@@ -96,7 +96,7 @@ int32_t leer_hx711(uint16_t comando) //comando son los pulsos extra que setean e
 		return -1;
 
 	int32_t reg = 0;
-	uint32_t flag = 0;
+	//uint32_t flag = 0;
 	int i=0;
 
 	if(HAL_GPIO_ReadPin(DT_GPIO_Port, DT_Pin)) //cuando leo 0, está listo
@@ -108,15 +108,23 @@ int32_t leer_hx711(uint16_t comando) //comando son los pulsos extra que setean e
 			{
 				reg<<=1;
 				HAL_GPIO_WritePin(SCK_GPIO_Port, SCK_Pin, 1);
-				start_timer(&htim1);
+				//start_timer(&htim1);				//chequeo de func de delay us
 				DELAY_US(1);
-				flag=stop_timer(&htim1);
-				flag++;
+				//flag=stop_timer(&htim1);
+				//flag++;
 				HAL_GPIO_WritePin(SCK_GPIO_Port, SCK_Pin, 0);
 				DELAY_US(1);
 				if(HAL_GPIO_ReadPin(DT_GPIO_Port, DT_Pin))//coloco el bit correspondiente segun el bit de la trama
 					reg|=1;
+
 			}
+		if(i>=24) //bits de comando
+		{
+			HAL_GPIO_WritePin(SCK_GPIO_Port, SCK_Pin, 1);
+			DELAY_US(1);
+			HAL_GPIO_WritePin(SCK_GPIO_Port, SCK_Pin, 0);
+			DELAY_US(1);
+		}
 		//HAL_GPIO_WritePin(SCK_GPIO_Port, SCK_Pin, 0);
 	}
 	return reg;
@@ -166,9 +174,9 @@ int main(void)
   while (1)
   {
 
-	  sensorVal  = leer_hx711(1);
+	  sensorVal  = leer_hx711(2);
 	  sensorVal++;
-	  HAL_Delay(100);//aplico 100ms de delay, tiempo que tarda en convertir el prox valor
+	  HAL_Delay(200);//aplico 100ms de delay, tiempo que tarda en convertir el prox valor
 
 
 
