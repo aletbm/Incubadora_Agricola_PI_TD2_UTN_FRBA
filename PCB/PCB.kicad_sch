@@ -3290,6 +3290,12 @@
 		(uuid "47ebf614-4981-4cd8-a013-ef4187df8ead")
 	)
 	(junction
+		(at 227.33 91.44)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "48bd9865-7754-483f-9407-47890bfc13ec")
+	)
+	(junction
 		(at 78.74 71.12)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -3306,6 +3312,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "69596ada-4ac0-4f6e-80ad-58fa24f798f6")
+	)
+	(junction
+		(at 222.25 88.9)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "72f27c7a-3537-4989-980a-90cf79edb9ee")
 	)
 	(junction
 		(at 227.33 143.51)
@@ -3344,12 +3356,6 @@
 		(uuid "b229d28b-fb70-4d79-b86e-a5b71ac35e43")
 	)
 	(junction
-		(at 222.25 81.28)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "b430c807-628f-439a-9b19-f05a90041deb")
-	)
-	(junction
 		(at 222.25 71.12)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -3372,12 +3378,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "c853859d-c8b7-4ff2-bb5a-84bea03ef2e1")
-	)
-	(junction
-		(at 227.33 78.74)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "ca16f603-9152-4fef-8554-3d24abe26665")
 	)
 	(junction
 		(at 102.87 71.12)
@@ -3415,13 +3415,23 @@
 	)
 	(wire
 		(pts
-			(xy 215.9 86.36) (xy 232.41 86.36)
+			(xy 166.37 102.87) (xy 167.64 102.87)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "022ea39a-842b-4748-885a-9a59bbd07b0c")
+		(uuid "00620922-dacf-41ac-87ec-79e64dd24625")
+	)
+	(wire
+		(pts
+			(xy 215.9 81.28) (xy 232.41 81.28)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "01ff4a31-e94d-4b8c-a183-4ef4bed7272f")
 	)
 	(wire
 		(pts
@@ -3452,6 +3462,16 @@
 			(type default)
 		)
 		(uuid "0fd33018-5904-4d88-a11d-2528253e5813")
+	)
+	(wire
+		(pts
+			(xy 215.9 83.82) (xy 232.41 83.82)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "12d78ac2-3ab0-4ac1-8ce6-472311c80899")
 	)
 	(wire
 		(pts
@@ -3625,16 +3645,6 @@
 	)
 	(wire
 		(pts
-			(xy 222.25 81.28) (xy 222.25 99.06)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "35b303c7-8b64-43ea-90dd-674c2e4174dc")
-	)
-	(wire
-		(pts
 			(xy 215.9 38.1) (xy 231.14 38.1)
 		)
 		(stroke
@@ -3685,6 +3695,16 @@
 	)
 	(wire
 		(pts
+			(xy 215.9 78.74) (xy 232.41 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "41f08db4-960a-418a-8d35-12cc318182e2")
+	)
+	(wire
+		(pts
 			(xy 227.33 109.22) (xy 231.14 109.22)
 		)
 		(stroke
@@ -3722,16 +3742,6 @@
 			(type default)
 		)
 		(uuid "4afc1d7b-e740-4e01-8882-405a141b57b2")
-	)
-	(wire
-		(pts
-			(xy 166.37 102.87) (xy 167.64 102.87)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4b6a153e-0694-4c6f-b968-4c6c90edab8d")
 	)
 	(wire
 		(pts
@@ -3792,16 +3802,6 @@
 			(type default)
 		)
 		(uuid "52b8f4cf-5859-4096-99f2-4a2826193a3e")
-	)
-	(wire
-		(pts
-			(xy 215.9 83.82) (xy 232.41 83.82)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "54b2069e-68c9-4eae-a748-eec39e96259a")
 	)
 	(wire
 		(pts
@@ -3905,16 +3905,6 @@
 	)
 	(wire
 		(pts
-			(xy 166.37 97.79) (xy 171.45 97.79)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "648d9757-eee2-4089-802e-eb16bb7ae3df")
-	)
-	(wire
-		(pts
 			(xy 86.36 120.65) (xy 91.44 120.65)
 		)
 		(stroke
@@ -3922,6 +3912,16 @@
 			(type default)
 		)
 		(uuid "65c07e48-e106-4ddf-9bc0-d67ead36ebd9")
+	)
+	(wire
+		(pts
+			(xy 166.37 100.33) (xy 171.45 100.33)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "661296e0-cf4e-49e4-bf4e-2f6e62dce5aa")
 	)
 	(wire
 		(pts
@@ -3985,16 +3985,6 @@
 	)
 	(wire
 		(pts
-			(xy 222.25 81.28) (xy 232.41 81.28)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7985d8d7-5de4-42f8-b8a6-b0bf5ee0d108")
-	)
-	(wire
-		(pts
 			(xy 102.87 90.17) (xy 110.49 90.17)
 		)
 		(stroke
@@ -4002,6 +3992,16 @@
 			(type default)
 		)
 		(uuid "7a0e57bd-ec39-4f8b-b9ae-6cf442db03b2")
+	)
+	(wire
+		(pts
+			(xy 166.37 97.79) (xy 171.45 97.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7a3cc257-db2a-4eef-bfcd-4c29bbc85c2b")
 	)
 	(wire
 		(pts
@@ -4085,16 +4085,6 @@
 	)
 	(wire
 		(pts
-			(xy 227.33 73.66) (xy 227.33 78.74)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "921fb9f9-c226-464c-9319-36d742d4f012")
-	)
-	(wire
-		(pts
 			(xy 34.29 123.19) (xy 38.1 123.19)
 		)
 		(stroke
@@ -4122,16 +4112,6 @@
 			(type default)
 		)
 		(uuid "96cb78de-28ca-4c4d-93da-1a7164e06f2a")
-	)
-	(wire
-		(pts
-			(xy 166.37 100.33) (xy 171.45 100.33)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "96f43af5-e835-4f6a-bb92-899677431054")
 	)
 	(wire
 		(pts
@@ -4195,13 +4175,13 @@
 	)
 	(wire
 		(pts
-			(xy 215.9 91.44) (xy 232.41 91.44)
+			(xy 227.33 73.66) (xy 227.33 91.44)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "a4ebb2d7-d9af-4e4c-8e8f-eacf769eb94c")
+		(uuid "a3651728-969e-4d25-b2f9-6aa83c7e2021")
 	)
 	(wire
 		(pts
@@ -4365,6 +4345,16 @@
 	)
 	(wire
 		(pts
+			(xy 222.25 88.9) (xy 232.41 88.9)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "bbfded08-15b8-43b9-a266-302de47e86c0")
+	)
+	(wire
+		(pts
 			(xy 166.37 95.25) (xy 171.45 95.25)
 		)
 		(stroke
@@ -4435,13 +4425,13 @@
 	)
 	(wire
 		(pts
-			(xy 227.33 78.74) (xy 227.33 96.52)
+			(xy 227.33 91.44) (xy 227.33 96.52)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "cdc94216-6651-49f4-8f9e-0f9f5ead2f2a")
+		(uuid "cdf67f31-abcd-4367-a546-3a98bcda3cf2")
 	)
 	(wire
 		(pts
@@ -4475,6 +4465,16 @@
 	)
 	(wire
 		(pts
+			(xy 227.33 91.44) (xy 232.41 91.44)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d4fd53d1-c0d7-4b14-80e2-118701874441")
+	)
+	(wire
+		(pts
 			(xy 116.84 93.98) (xy 116.84 90.17)
 		)
 		(stroke
@@ -4482,6 +4482,26 @@
 			(type default)
 		)
 		(uuid "d7129fff-2906-457d-921f-8bcddfaae19c")
+	)
+	(wire
+		(pts
+			(xy 222.25 71.12) (xy 222.25 88.9)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d72b75f5-e919-4606-845c-ce1d1e6eada3")
+	)
+	(wire
+		(pts
+			(xy 222.25 88.9) (xy 222.25 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d8bc213e-50b8-4c50-8414-e3a68389441f")
 	)
 	(wire
 		(pts
@@ -4555,16 +4575,6 @@
 	)
 	(wire
 		(pts
-			(xy 222.25 71.12) (xy 222.25 81.28)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "e062fbe4-cbbf-4106-9436-c5c85c141d2c")
-	)
-	(wire
-		(pts
 			(xy 102.87 124.46) (xy 102.87 120.65)
 		)
 		(stroke
@@ -4572,6 +4582,16 @@
 			(type default)
 		)
 		(uuid "e42a8675-46b9-4fca-97c4-f45cc97b7bcb")
+	)
+	(wire
+		(pts
+			(xy 167.64 102.87) (xy 167.64 104.14)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e5b327f7-06a7-48a6-9ea8-29552434d995")
 	)
 	(wire
 		(pts
@@ -4625,26 +4645,6 @@
 	)
 	(wire
 		(pts
-			(xy 215.9 88.9) (xy 232.41 88.9)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ed012b2b-5e89-4f88-a01f-af31db879b46")
-	)
-	(wire
-		(pts
-			(xy 167.64 102.87) (xy 167.64 104.14)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ed62e155-e871-4ee0-a176-4e085905d5c5")
-	)
-	(wire
-		(pts
 			(xy 232.41 125.73) (xy 227.33 125.73)
 		)
 		(stroke
@@ -4652,16 +4652,6 @@
 			(type default)
 		)
 		(uuid "ee88cb91-1b8c-4846-b953-8823d85ec687")
-	)
-	(wire
-		(pts
-			(xy 227.33 78.74) (xy 232.41 78.74)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ef607741-73a6-47f7-8430-0374ff543c3d")
 	)
 	(wire
 		(pts
@@ -4682,6 +4672,16 @@
 			(type default)
 		)
 		(uuid "f2082981-04f2-4b5f-8250-7270c0f10852")
+	)
+	(wire
+		(pts
+			(xy 215.9 86.36) (xy 232.41 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f3af99c3-5abb-4a06-89c9-58185bcb85f1")
 	)
 	(wire
 		(pts
@@ -4742,6 +4742,28 @@
 			(type default)
 		)
 		(uuid "fe17ca37-3afb-4f14-86c8-407f017405e0")
+	)
+	(global_label "+9V"
+		(shape input)
+		(at 171.45 100.33 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "01cf812b-0b5b-4486-b811-3151647644fc")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 178.3057 100.33 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
 	)
 	(global_label "PIN_ENCODER"
 		(shape input)
@@ -4809,7 +4831,7 @@
 			)
 		)
 	)
-	(global_label "B15_R"
+	(global_label "+12V_R_Cooler"
 		(shape output)
 		(at 215.9 40.64 180)
 		(fields_autoplaced yes)
@@ -4821,7 +4843,7 @@
 		)
 		(uuid "1661b295-1428-4a08-82af-6406c03b8aad")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.9882 40.64 0)
+			(at 198.5216 40.64 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4897,28 +4919,6 @@
 			)
 		)
 	)
-	(global_label "+9V"
-		(shape input)
-		(at 171.45 100.33 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "37038ecd-cc03-454d-bf8d-24d7356619d4")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 178.3057 100.33 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-	)
 	(global_label "A11"
 		(shape input)
 		(at 213.36 130.81 180)
@@ -4985,6 +4985,28 @@
 			)
 		)
 	)
+	(global_label "B13"
+		(shape input)
+		(at 215.9 83.82 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "47182c39-8a8d-40fe-8d96-ba74b15a83cf")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 209.2258 83.82 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "+5V"
 		(shape output)
 		(at 118.11 113.03 0)
@@ -5007,7 +5029,29 @@
 			)
 		)
 	)
-	(global_label "+12V_R"
+	(global_label "PIN_MOTOR"
+		(shape input)
+		(at 215.9 78.74 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "52b7a248-5985-42c5-ae33-602a3b499d20")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 202.3919 78.74 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "+12V_R_Motor"
 		(shape input)
 		(at 215.9 106.68 180)
 		(fields_autoplaced yes)
@@ -5019,12 +5063,34 @@
 		)
 		(uuid "59fd5904-1882-4e8f-827e-25c3c61b8381")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 205.5972 106.68 0)
+			(at 199.3683 106.68 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "PIN_MOTOR"
+		(shape output)
+		(at 171.45 97.79 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "5c5fccd3-f142-4fbf-b924-a38643ab00e5")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 184.9581 97.79 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
@@ -5053,7 +5119,7 @@
 	)
 	(global_label "B15"
 		(shape input)
-		(at 215.9 91.44 180)
+		(at 215.9 86.36 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -5061,9 +5127,9 @@
 			)
 			(justify right)
 		)
-		(uuid "63dfc7dc-4531-4902-9436-ad56a647cba6")
+		(uuid "6758e9ee-81e7-4a41-aac1-f822153bb703")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 209.2258 91.44 0)
+			(at 209.2258 86.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5139,28 +5205,6 @@
 			)
 		)
 	)
-	(global_label "PIN_MOTOR"
-		(shape input)
-		(at 215.9 83.82 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "81a53c24-bf76-431a-9fde-d3b2711539c4")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 202.3919 83.82 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-				(hide yes)
-			)
-		)
-	)
 	(global_label "PIN_LAMPARA"
 		(shape output)
 		(at 171.45 95.25 0)
@@ -5185,7 +5229,7 @@
 	)
 	(global_label "PIN_LAMPARA"
 		(shape input)
-		(at 215.9 86.36 180)
+		(at 215.9 81.28 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -5193,9 +5237,9 @@
 			)
 			(justify right)
 		)
-		(uuid "897a95c2-56a6-4eb2-a84f-e2d209ace599")
+		(uuid "8c0f0922-4979-4d09-8505-3d3b856340a8")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 200.4566 86.36 0)
+			(at 200.4566 81.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5205,7 +5249,7 @@
 			)
 		)
 	)
-	(global_label "B15_R"
+	(global_label "+12V_R_Cooler"
 		(shape input)
 		(at 215.9 115.57 180)
 		(fields_autoplaced yes)
@@ -5217,7 +5261,7 @@
 		)
 		(uuid "8f904f6a-ca09-4bd5-b366-d5dbe7ffceb5")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.9882 115.57 0)
+			(at 198.5216 115.57 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5315,7 +5359,7 @@
 			)
 		)
 	)
-	(global_label "+12V_R"
+	(global_label "+12V_R_Motor"
 		(shape output)
 		(at 215.9 35.56 180)
 		(fields_autoplaced yes)
@@ -5327,7 +5371,7 @@
 		)
 		(uuid "b88e465b-0a3c-42df-b47f-2cb1574acaf7")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 205.5972 35.56 0)
+			(at 199.3683 35.56 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5381,50 +5425,6 @@
 			)
 		)
 	)
-	(global_label "PIN_MOTOR"
-		(shape output)
-		(at 171.45 97.79 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "c72aad1a-8dba-49ee-8052-b99423346018")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 184.9581 97.79 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-	)
-	(global_label "B13"
-		(shape input)
-		(at 215.9 88.9 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "cea87d18-5b82-43ea-8eee-e5d494bb2d2d")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 209.2258 88.9 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-				(hide yes)
-			)
-		)
-	)
 	(global_label "A11"
 		(shape output)
 		(at 171.45 67.31 0)
@@ -5469,7 +5469,7 @@
 			)
 		)
 	)
-	(global_label "B13_R"
+	(global_label "+5V_R_Humidificador"
 		(shape input)
 		(at 215.9 123.19 180)
 		(fields_autoplaced yes)
@@ -5481,7 +5481,7 @@
 		)
 		(uuid "e7645d59-908b-4ec2-8c2e-016b19270de0")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.9882 123.19 0)
+			(at 192.6554 123.19 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5535,7 +5535,7 @@
 			)
 		)
 	)
-	(global_label "B13_R"
+	(global_label "+5V_R_Humidificador"
 		(shape output)
 		(at 215.9 38.1 180)
 		(fields_autoplaced yes)
@@ -5547,7 +5547,7 @@
 		)
 		(uuid "fb439cc4-e3b6-4eae-b74d-a5288ebade50")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.9882 38.1 0)
+			(at 192.6554 38.1 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5765,7 +5765,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 121.92 96.52 0)
 			(effects
 				(font
@@ -5969,7 +5969,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 236.22 33.02 0)
 			(effects
 				(font
@@ -6036,7 +6036,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 121.92 120.65 0)
 			(effects
 				(font
@@ -6106,7 +6106,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-04A_1x04_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-04A_1x04_P3.96mm_Vertical"
 			(at 237.49 55.88 0)
 			(effects
 				(font
@@ -6182,7 +6182,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-02A_1x02_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-02A_1x02_P3.96mm_Vertical"
 			(at 237.49 115.57 0)
 			(effects
 				(font
@@ -6250,7 +6250,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 121.92 62.23 0)
 			(effects
 				(font
@@ -6317,7 +6317,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 236.22 106.68 0)
 			(effects
 				(font
@@ -6384,7 +6384,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-15A_1x15_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_A-41791-0015_1x15_P3.96mm_Vertical"
 			(at 161.29 85.09 0)
 			(effects
 				(font
@@ -6557,7 +6557,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_TO_SOT_THT:TO-220-3_Vertical"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-223"
 			(at 78.74 54.61 0)
 			(effects
 				(font
@@ -6770,7 +6770,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-03A_1x03_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-03A_1x03_P3.96mm_Vertical"
 			(at 237.49 151.13 0)
 			(effects
 				(font
@@ -6981,7 +6981,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-03A_1x03_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-03A_1x03_P3.96mm_Vertical"
 			(at 237.49 99.06 0)
 			(effects
 				(font
@@ -7044,7 +7044,7 @@
 				)
 			)
 		)
-		(property "Value" "Tx"
+		(property "Value" "TX"
 			(at 239.776 134.62 0)
 			(effects
 				(font
@@ -7052,7 +7052,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-03A_1x03_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-03A_1x03_P3.96mm_Vertical"
 			(at 237.49 133.35 0)
 			(effects
 				(font
@@ -7125,7 +7125,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-05A_1x05_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-05A_1x05_P3.96mm_Vertical"
 			(at 237.49 68.58 0)
 			(effects
 				(font
@@ -7343,7 +7343,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "Humidificador"
+		(property "Value" "Humidi."
 			(at 238.76 124.46 0)
 			(effects
 				(font
@@ -7352,7 +7352,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-02A_1x02_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-02A_1x02_P3.96mm_Vertical"
 			(at 237.49 123.19 0)
 			(effects
 				(font
@@ -7420,7 +7420,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_Molex:Molex_KK-254_AE-6410-02A_1x02_P2.54mm_Vertical"
+		(property "Footprint" "Connector_Molex:Molex_KK-396_5273-02A_1x02_P3.96mm_Vertical"
 			(at 237.49 140.97 0)
 			(effects
 				(font
@@ -7617,7 +7617,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "0.22uF"
+		(property "Value" "0.33uF"
 			(at 55.88 127.7238 0)
 			(effects
 				(font
@@ -7626,7 +7626,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:CP_Radial_D4.0mm_P2.00mm"
+		(property "Footprint" "Capacitor_THT:CP_Radial_D5.0mm_P2.50mm"
 			(at 53.34 127 0)
 			(effects
 				(font
@@ -7693,7 +7693,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 236.22 38.1 0)
 			(effects
 				(font
@@ -7761,7 +7761,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm"
 			(at 29.21 120.65 0)
 			(effects
 				(font
