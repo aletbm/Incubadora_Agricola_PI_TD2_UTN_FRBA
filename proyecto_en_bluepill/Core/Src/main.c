@@ -121,7 +121,7 @@ int main(void)
    * Al iniciarse el ESP32 queda esperando 2 minutos a que le llegen los datos
    * de nombre de red, contraseña y ID de chat del telegram.
    */
-  HAL_Delay(5000); //Espero a que se inicie el modulo wifi
+  HAL_Delay(1000); //Espero a que se inicie el modulo wifi
   //int len = snprintf(msg, sizeof(msg), "%s,%s,%s\n", ssid, password, chat_id);
   int config = snprintf(msg, sizeof(msg), "%s,%s,%s\n", ssid, password, chat_id);
   HAL_UART_Transmit(&huart1, (uint8_t*)msg, config, 1000);
@@ -140,7 +140,9 @@ int main(void)
 
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		RELES_ToggleTodos();
-		HAL_Delay(2000);
+		HAL_Delay(1000);
+//		RELES_ToggleTodos();
+//		HAL_Delay(1000);
 		num++;
     }
   /* USER CODE END 3 */

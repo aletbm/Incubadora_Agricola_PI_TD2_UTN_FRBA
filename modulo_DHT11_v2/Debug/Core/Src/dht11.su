@@ -1,0 +1,11 @@
+dht11.c:17:6:start_timer	8	static
+dht11.c:21:6:reset_timer	4	static
+dht11.c:25:10:read_timer	4	static
+dht11.c:29:6:prueba	16	static
+dht11.c:37:6:toggle_pin_mode	32	static
+dht11.c:58:6:DHT11_Init	24	static
+dht11.c:74:6:DHT11_Solicitar_datos	8	static
+dht11.c:85:9:DHT11_Espero_datos	8	static
+dht11.c:104:8:DHT11_Leo_datos	368	static
+dht11.c:154:10:DHT11_GetTemperatura	8	static
+dht11.c:166:10:DHT11_GetHumedad	8	static

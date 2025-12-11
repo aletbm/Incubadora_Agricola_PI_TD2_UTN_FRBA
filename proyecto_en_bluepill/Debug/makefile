@@ -61,8 +61,8 @@ all: main-build
 main-build: proyecto_en_bluepill.elf secondary-outputs
 
 # Tool invocations
-proyecto_en_bluepill.elf: $(OBJS) $(USER_OBJS) C:\Users\Magdalena\STM32CubeIDE\workspace_1.6.1\modulo_DHT11\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "proyecto_en_bluepill.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\Magdalena\STM32CubeIDE\workspace_1.6.1\modulo_DHT11\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="proyecto_en_bluepill.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+proyecto_en_bluepill.elf: $(OBJS) $(USER_OBJS) C:\Users\Luciano\Documents\UTN\_4to\ NIVEL\Tecnicas\ Digitales\ II\Incubadora_Agricola_PI_TD2_UTN_FRBA\proyecto_en_bluepill\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "proyecto_en_bluepill.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\Luciano\Documents\UTN\_4to NIVEL\Tecnicas Digitales II\Incubadora_Agricola_PI_TD2_UTN_FRBA\proyecto_en_bluepill\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="proyecto_en_bluepill.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

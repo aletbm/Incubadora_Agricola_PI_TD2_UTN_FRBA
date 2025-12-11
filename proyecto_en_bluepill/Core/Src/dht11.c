@@ -11,6 +11,9 @@
 
 static uint32_t humedad = 0;
 static uint32_t temperatura = 0;
+static uint32_t x = 0;
+static uint32_t y = 0;
+
 extern TIM_HandleTypeDef htim1;
 /*Funcion para iniciar el timer*/
 void start_timer(void){
@@ -78,18 +81,17 @@ void DHT11_Solicitar_datos(void) {
 }
 
 uint8_t DHT11_Espero_datos(void) {
-	toggle_pin_mode(0); //pongo pin en input
-
+	toggle_pin_mode(0); //pongo pin en input  /0=input, 1=output
     reset_timer();
     while (HAL_GPIO_ReadPin(GPIOA, DHT11_Pin) == GPIO_PIN_RESET) {
-      if (read_timer() >= 100000) { // Deberia responder en 80 us
+      if (read_timer() >= 100) { // Deberia responder en 80 us
         return 0;
       }
     }
 
     reset_timer();
     while (HAL_GPIO_ReadPin(GPIOA, DHT11_Pin) == GPIO_PIN_SET) {
-      if (read_timer() >= 100000) { // Deberia responder en 80 us
+      if (read_timer() >= 100) { // Deberia responder en 80 us
         return 0;
       }
     }
@@ -103,7 +105,9 @@ uint8_t DHT11_Leo_datos(void) {
 	for(int i=0; i < 41; i++){
 		if(i != 0){
 			reset_timer();
-			while(HAL_GPIO_ReadPin(GPIOA, DHT11_Pin) == GPIO_PIN_RESET);
+			while(HAL_GPIO_ReadPin(GPIOA, DHT11_Pin) == GPIO_PIN_RESET){
+
+			}
 			data_ciclos_bajo[i-1] = read_timer();
 			reset_timer();
 			while(HAL_GPIO_ReadPin(GPIOA, DHT11_Pin) == GPIO_PIN_SET);
