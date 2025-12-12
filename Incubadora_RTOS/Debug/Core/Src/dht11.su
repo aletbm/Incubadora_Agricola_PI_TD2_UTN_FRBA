@@ -1,0 +1,6 @@
+dht11.c:17:6:start_timer	8	static
+dht11.c:21:6:reset_timer	4	static
+dht11.c:25:10:read_timer	4	static
+dht11.c:31:6:toggle_pin_mode	40	static
+dht11.c:52:6:DHT11_Init	32	static
+dht11.c:70:8:DHT11_GetDatos	368	static
