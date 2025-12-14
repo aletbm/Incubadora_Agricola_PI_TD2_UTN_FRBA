@@ -4,8 +4,8 @@
 #include "main.h"
 #include "config.h"
 // Estados
-#define RELE_ACTIVO   GPIO_PIN_SET
-#define RELE_INACTIVO GPIO_PIN_RESET
+#define RELE_ACTIVO   GPIO_PIN_RESET
+#define RELE_INACTIVO GPIO_PIN_SET
 
 // Prototipos de funciones
 void RELES_Init(void);

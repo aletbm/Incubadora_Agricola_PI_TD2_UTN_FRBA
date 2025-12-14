@@ -55,16 +55,20 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
+void StartMenuTask(void const * argument);
+void StartDebounceTask(void const * argument);
+void StartMotorTask(void const * argument);
+void StartControlTask(void const * argument);
+
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
 
-void StartMenuTask(void const * argument);
-void StartDebounceTask(void const * argument);
-void StartMotorTask(void const * argument);
-void StartControlTask(void const * argument);
+extern TIM_HandleTypeDef htim1;
+extern float last_valid_temp;
+extern float last_valid_hum;
 
 /* USER CODE END Private defines */
 

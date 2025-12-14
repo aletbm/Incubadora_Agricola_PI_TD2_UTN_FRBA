@@ -25,6 +25,8 @@
 #include "eeprom.h"
 #include "utils.h"
 #include "config.h"
+#include "rele.h"
+#include "dht11.h"
 
 /* USER CODE END Includes */
 
@@ -57,6 +59,8 @@ osThreadId menuTaskHandle;
 osThreadId debounceTaskHandle;
 osThreadId MotorTaskHandle;
 osThreadId ControlTaskHandle; // Handle para la nueva tarea
+osThreadId DHT11TaskHandle;
+
 osMessageQId menuQueueHandle;
 
 /* USER CODE BEGIN PV */
@@ -557,10 +561,11 @@ void StartControlTask(void const * argument)
        Asegura que todos los actuadores estén apagados al inicio
        (Active Low → HIGH = OFF)
        ============================================================ */
-    HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET); // Cooler OFF
-    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_SET); // Humidificador OFF
-    HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET); // Lámpara OFF
-    HAL_GPIO_WritePin(test_outputs[3].port, test_outputs[3].pin, GPIO_PIN_SET); // Motor OFF
+	apagar_cooler();
+	apagar_humidificador();
+	apagar_lampara();
+	apagar_motor();
+	apagar_buzzer();
 
     /* Variables de control */
     float target_t = 0;          // Temperatura objetivo
@@ -600,11 +605,10 @@ void StartControlTask(void const * argument)
                (Reemplazar por DHT11_Read / DHT22_Read) */
 
             // Si la lámpara está encendida → sube la temperatura
-            if (HAL_GPIO_ReadPin(test_outputs[2].port, test_outputs[2].pin) == GPIO_PIN_RESET) {
+            if (estado_lampara() == RELE_ACTIVO)
                 last_valid_temp += 0.2f;
-            } else {
-                last_valid_temp -= 0.1f;
-            }
+            else
+            	last_valid_temp -= 0.1f;
 
             /* Límite inferior de seguridad */
             if (last_valid_temp < 20.0f)
@@ -626,27 +630,25 @@ void StartControlTask(void const * argument)
 
         if (error_temp > 0.5f) {
             /* Muy frío → Lámpara ON, Cooler OFF */
-            HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET);
+            encender_lampara();
+            apagar_cooler();
         }
         else if (error_temp > 0.0f && error_temp <= 0.5f) {
             /* Zona de regulación suave (Soft PWM 15s) */
-            if ((now - last_dht_read_time) < 15000) {
-                HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_RESET); // ON
-            } else {
-                HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET);   // OFF
-            }
+            if ((now - last_dht_read_time) < 15000)
+                encender_lampara(); // ON
+            else
+            	apagar_lampara();   // OFF
         }
         else {
             /* Temperatura alcanzada o excedida */
-            HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET); // Lámpara OFF
+            apagar_lampara(); // Lámpara OFF
 
             /* Protección térmica con ventilación */
-            if (last_valid_temp > (target_t + 1.0f)) {
-                HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_RESET); // Cooler ON
-            } else {
-                HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET);   // Cooler OFF
-            }
+            if (last_valid_temp > (target_t + 1.0f))
+                encender_cooler(); // Cooler ON
+            else
+                apagar_cooler();   // Cooler OFF
         }
 
         /* ============================================================
@@ -658,7 +660,7 @@ void StartControlTask(void const * argument)
             case HUM_STATE_IDLE:
                 /* Humedad baja → iniciar dosificación */
                 if (last_valid_hum < (target_h - 5.0f)) {
-                    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_RESET); // ON
+                    encender_humidificador(); // ON
                     hum_timer_start = now;
                     hum_state = HUM_STATE_DOSING;
                 }
@@ -667,7 +669,7 @@ void StartControlTask(void const * argument)
             case HUM_STATE_DOSING:
                 /* Tiempo máximo de inyección de humedad */
                 if ((now - hum_timer_start) >= HUM_DOSE_TIME_MS) {
-                    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_SET); // OFF
+                    apagar_humidificador(); // OFF
                     hum_timer_start = now;
                     hum_state = HUM_STATE_COOLDOWN;
                 }
@@ -675,9 +677,8 @@ void StartControlTask(void const * argument)
 
             case HUM_STATE_COOLDOWN:
                 /* Tiempo de estabilización antes de volver a medir */
-                if ((now - hum_timer_start) >= HUM_COOLDOWN_TIME_MS) {
+                if ((now - hum_timer_start) >= HUM_COOLDOWN_TIME_MS)
                     hum_state = HUM_STATE_IDLE;
-                }
                 break;
         }
 
@@ -686,6 +687,16 @@ void StartControlTask(void const * argument)
            ============================================================ */
         osDelay(CONTROL_LOOP_MS);
     }
+}
+
+
+void StartDHT11Task(void const * argument){
+	TickType_t demora = 1000;
+	TickType_t tiempo_medido = 0;
+	if(xTaskGetTickCount() - tiempo_medido > demora){
+		DHT11_GetDatos();
+		tiempo_medido = xTaskGetTickCount();
+	}
 }
 
 
@@ -738,6 +749,7 @@ int main(void)
 		  1000                 // 1 segundo
   );
 
+  DHT11_Init();
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -770,9 +782,13 @@ int main(void)
   osThreadDef(MotorTask, StartMotorTask, osPriorityIdle, 0, 128);
   MotorTaskHandle = osThreadCreate(osThread(MotorTask), NULL);
 
-  // Nueva Tarea de Control
+  // definition and creation of ControlTask
   osThreadDef(ControlTask, StartControlTask, osPriorityNormal, 0, 512);
   ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
+
+  // definition and creation of ControlTask
+  osThreadDef(DHT11Task, StartDHT11Task, osPriorityNormal, 0, 512);
+  DHT11TaskHandle = osThreadCreate(osThread(DHT11Task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* USER CODE END RTOS_THREADS */
