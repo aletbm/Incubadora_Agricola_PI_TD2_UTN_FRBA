@@ -1,4 +1,5 @@
 #include "i2c-lcd.h"
+#include "utils.h"
 
 extern I2C_HandleTypeDef hi2c1;
 
@@ -7,15 +8,6 @@ uint8_t dpControl;
 uint8_t dpMode;
 uint8_t dpRows;
 uint8_t dpBacklight;
-
-static void SendCommand(uint8_t);
-static void SendChar(uint8_t);
-static void Send(uint8_t, uint8_t);
-static void Write4Bits(uint8_t);
-static void ExpanderWrite(uint8_t);
-static void PulseEnable(uint8_t);
-static void DelayInit(void);
-static void DelayUS(uint32_t);
 
 uint8_t special1[8] = {
         0b00000,
@@ -38,6 +30,31 @@ uint8_t special2[8] = {
         0b00110,
         0b00000
 };
+
+// --- VARIABLES DE UI (Menú Principal Actualizado) ---
+// Nota: El item index 1 es dinámico (INICIAR/PAUSAR)
+char* menu_items[] = {"Ver Sensores", "Ciclo: ???   ", "Configuracion", "TEST", "Volver <-"};
+int8_t selected_item = 0;
+const int8_t menu_size = 5;
+int8_t menu_top_item = 0;
+
+const int8_t test_menu_size = 4;
+int8_t test_selected_item = 0;
+int8_t test_top_item = 0;
+
+// Variables Config Select
+// ACTUALIZADO: Agregado "Ajustar Tiempo"
+char* config_menu_items[] = {"CFG: Desarrollo", "CFG:Eclosion", "Ciclo Total", "Ajustar Tiempo", "Volver <-"};
+int8_t config_sel_index = 0;
+int8_t config_top_index = 0;
+const int8_t config_menu_sz = 5; // Aumentado a 5
+
+// Variables Config Edit
+int8_t config_item = 0;
+int8_t is_editing_val = 0;
+
+// --- VARIABLES DE SISTEMA ---
+UIMode_t current_ui_mode = UI_MODE_DASHBOARD;
 
 void HD44780_Init(uint8_t rows)
 {
@@ -293,4 +310,345 @@ static void DelayUS(uint32_t us) {
   {
     cnt = DWT->CYCCNT - start;
   } while(cnt < cycles);
+}
+
+/**
+ * @brief Habilita las resistencias pull-up internas para el bus I2C1
+ *
+ * Esta función configura los pines GPIO asociados al bus I2C1
+ * (PB8 = SCL, PB9 = SDA) en modo Alternate Function Open-Drain
+ * con resistencias pull-up internas habilitadas.
+ *
+ * Las resistencias pull-up son necesarias para el correcto
+ * funcionamiento del bus I2C, ya que las líneas SCL y SDA
+ * operan en configuración open-drain.
+ *
+ * Nota:
+ * En aplicaciones finales se recomienda el uso de resistencias
+ * pull-up externas para cumplir con las especificaciones del bus
+ * I2C y garantizar mejores tiempos de subida.
+ */
+void Enable_Internal_Pullups(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    /* Habilitar clock del puerto GPIOB */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* Configuración de pines PB8 (SCL) y PB9 (SDA) */
+    GPIO_InitStruct.Pin       = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStruct.Mode      = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull      = GPIO_PULLUP;
+    GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+
+    /* Inicialización de los pines GPIO */
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
+
+/**
+ * @brief Inicializa el LCD y muestra un mensaje de bienvenida
+ *
+ * Inicializa el controlador HD44780, limpia la pantalla y muestra
+ * un mensaje en la primera línea durante un tiempo determinado.
+ *
+ * @param rows Cantidad de filas del LCD (ej: 2 o 4)
+ * @param msg  Mensaje a mostrar en la primera línea
+ * @param delay_ms Tiempo en milisegundos que el mensaje permanece visible
+ */
+void LCD_ShowWelcome(uint8_t rows, const char *msg, uint32_t delay_ms)
+{
+    /* Inicialización del LCD */
+    HD44780_Init(rows);
+    HD44780_Clear();
+
+    /* Mostrar mensaje */
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr(msg);
+
+    /* Mantener mensaje visible */
+    HAL_Delay(delay_ms);
+
+    /* Limpiar la línea */
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr("                ");
+}
+
+/**
+ * @brief Renderiza la pantalla principal (Dashboard) del sistema.
+ *
+ * Muestra en el LCD:
+ *  - Temperatura actual y objetivo
+ *  - Humedad actual
+ *  - Estado del control de humedad
+ *  - Día y hora del ciclo de incubación
+ *
+ * El contenido varía dependiendo de si el sistema está en ejecución
+ * o en pausa.
+ */
+void render_dashboard(void)
+{
+    char buffer[20];                     // Buffer para línea LCD
+    float target_t = 0;                  // Temperatura objetivo
+    float target_h = 0;                  // Humedad objetivo (no mostrada aquí)
+    uint8_t mon = 0;                     // Estado del motor (no usado en dashboard)
+
+    // Si el ciclo está activo, mostrar temperatura actual / objetivo
+    if (sysData.is_running) {
+        Get_Active_Targets(&target_t, &target_h, &mon);
+        // Formato: T:37.7/37.7
+        snprintf(buffer, sizeof(buffer),
+                 "T:%04.1f/%04.1f    ",
+                 liveStatus.temp_current, target_t);
+    }
+    // Si está en pausa, mostrar solo temperatura actual
+    else {
+        snprintf(buffer, sizeof(buffer),
+                 "T:%04.1f (PAUSA) ",
+                 liveStatus.temp_current);
+    }
+
+    // Escribir línea superior del LCD
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr(buffer);
+
+    // Determinar símbolo de estado de humedad
+    char hum_char = ' ';
+    if (hum_state == HUM_STATE_DOSING)   hum_char = '*'; // Humidificando
+    if (hum_state == HUM_STATE_COOLDOWN) hum_char = 'w'; // En enfriamiento
+
+    // Línea inferior del LCD
+    if (sysData.is_running) {
+        snprintf(buffer, sizeof(buffer),
+                 "H:%02.0f%%%c D:%02d H:%02d",
+                 liveStatus.hum_current,
+                 hum_char,
+                 liveStatus.day_current,
+                 liveStatus.hour_current);
+    }
+    else {
+        snprintf(buffer, sizeof(buffer),
+                 "H:%02.0f%% STANDBY ",
+                 liveStatus.hum_current);
+    }
+
+    HD44780_SetCursor(0, 1);
+    HD44780_PrintStr(buffer);
+}
+
+/**
+ * @brief Renderiza el menú principal del sistema.
+ *
+ * Muestra una lista desplazable de opciones con cursor.
+ * El texto de la opción "Iniciar/Pausar ciclo" se actualiza
+ * dinámicamente según el estado del sistema.
+ */
+void render_menu(void)
+{
+    char line_buffer[32];   // Buffer de línea
+
+    for (int i = 0; i < LCD_ROWS; i++) {
+        int item_index = menu_top_item + i;
+
+        if (item_index < menu_size) {
+            // Mostrar cursor en el ítem seleccionado
+            char cursor = (item_index == selected_item) ? '>' : ' ';
+
+            // Texto dinámico para iniciar/pausar ciclo
+            if (current_ui_mode == UI_MODE_MAIN_MENU && item_index == 1) {
+                snprintf(line_buffer, sizeof(line_buffer),
+                         "%c%-15.15s",
+                         cursor,
+                         sysData.is_running ? "PAUSAR CICLO" : "INICIAR CICLO");
+            }
+            // Texto normal del menú
+            else {
+                snprintf(line_buffer, sizeof(line_buffer),
+                         "%c%-15.15s",
+                         cursor,
+                         menu_items[item_index]);
+            }
+        }
+        // Línea vacía si no hay ítems
+        else {
+            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
+        }
+
+        HD44780_SetCursor(0, i);
+        HD44780_PrintStr(line_buffer);
+    }
+}
+
+
+/**
+ * @brief Renderiza el menú de pruebas de salidas.
+ *
+ * Permite activar/desactivar manualmente salidas digitales
+ * para verificación de hardware.
+ */
+void render_test_menu(void)
+{
+    char line_buffer[20];
+
+    for (int i = 0; i < LCD_ROWS; i++) {
+        int item_index = test_top_item + i;
+
+        if (item_index < test_menu_size) {
+            char cursor = (item_index == test_selected_item) ? '>' : ' ';
+            char state_char = (test_outputs[item_index].state) ? 'X' : ' ';
+
+            snprintf(line_buffer, sizeof(line_buffer),
+                     "%c[%c] %-9s",
+                     cursor,
+                     state_char,
+                     test_outputs[item_index].name);
+        }
+        else {
+            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
+        }
+
+        HD44780_SetCursor(0, i);
+        HD44780_PrintStr(line_buffer);
+    }
+}
+
+/**
+ * @brief Renderiza el menú de selección de configuración.
+ *
+ * Permite elegir entre configuración global, por etapas
+ * u otras opciones de ajuste.
+ */
+void render_config_select(void)
+{
+    char line_buffer[20];
+
+    for (int i = 0; i < LCD_ROWS; i++) {
+        int item_index = config_top_index + i;
+
+        if (item_index < config_menu_sz) {
+            char cursor = (item_index == config_sel_index) ? '>' : ' ';
+            snprintf(line_buffer, sizeof(line_buffer),
+                     "%c%-15.15s",
+                     cursor,
+                     config_menu_items[item_index]);
+        }
+        else {
+            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
+        }
+
+        HD44780_SetCursor(0, i);
+        HD44780_PrintStr(line_buffer);
+    }
+}
+
+
+/**
+ * @brief Actualiza el contenido del LCD según el modo actual de la UI.
+ *
+ * Esta función centraliza el renderizado de pantallas y asegura
+ * acceso exclusivo al bus I2C/LCD mediante una sección crítica.
+ *
+ * @note No debe incluir retardos internos.
+ */
+void update_display(void)
+{
+    // Proteger el acceso al LCD frente a ISR o tareas concurrentes
+    taskENTER_CRITICAL();
+
+    if      (current_ui_mode == UI_MODE_DASHBOARD)      render_dashboard();
+    else if (current_ui_mode == UI_MODE_MAIN_MENU)      render_menu();
+    else if (current_ui_mode == UI_MODE_TEST_MENU)      render_test_menu();
+    else if (current_ui_mode == UI_MODE_CONFIG_SELECT)  render_config_select();
+    else if (current_ui_mode == UI_MODE_CONFIG_EDIT)    render_config_edit();
+    else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL)  render_config_global();
+    else if (current_ui_mode == UI_MODE_CONFIG_TIME)    render_config_time();
+
+    taskEXIT_CRITICAL();
+}
+
+
+/**
+ * @brief Recupera el funcionamiento del LCD ante fallas de comunicación
+ *
+ * Esta función reinicializa el display LCD basado en HD44780,
+ * limpia la pantalla y muestra un mensaje de alerta indicando
+ * que se realizó un reinicio de emergencia del display.
+ *
+ * Luego del mensaje, la pantalla se limpia nuevamente y se
+ * redibuja la interfaz actual del sistema.
+ *
+ * Se utiliza un retardo para garantizar la correcta
+ * inicialización del controlador LCD.
+ */
+void recover_lcd(void)
+{
+    /* Reinicializar LCD */
+    HD44780_Init(2);
+    HD44780_Clear();
+
+    /* Pequeña espera para estabilizar el display */
+    osDelay(50);
+
+    /* Mensaje de advertencia */
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr("! PANIC RESET ! ");
+
+    /* Mostrar mensaje durante 1 segundo */
+    osDelay(1000);
+
+    /* Limpiar pantalla y restaurar la UI */
+    HD44780_Clear();
+    update_display();
+}
+
+/**
+ * @brief Escanea el bus I2C en busca de dispositivos conectados
+ *
+ * Esta función recorre todas las direcciones posibles del bus I2C
+ * y verifica si existe un dispositivo que responda en cada una.
+ *
+ * Las direcciones detectadas se informan por consola UART,
+ * lo cual resulta útil para depuración y validación de hardware.
+ *
+ * El escaneo se realiza sobre el periférico I2C1 y reporta
+ * únicamente los dispositivos que responden correctamente.
+ */
+void I2C_Scan(void)
+{
+    /* Mensaje de inicio del escaneo */
+    char info[] = "Escaneando bus I2C...\r\n";
+    HAL_UART_Transmit(&huart2,
+                      (uint8_t *)info,
+                      sizeof(info) - 1,
+                      100);
+
+    HAL_StatusTypeDef res;
+
+    /* Recorrer todas las direcciones I2C posibles */
+    for (uint16_t i = 0; i < 128; i++) {
+
+        /* Comprobar si un dispositivo responde en la dirección */
+        res = HAL_I2C_IsDeviceReady(&hi2c1,
+                                   (uint16_t)(i << 1),
+                                   1,
+                                   10);
+
+        if (res == HAL_OK) {
+            char msg[64];
+            snprintf(msg, sizeof(msg),
+                     "-> Disp: 0x%02X\r\n", i);
+
+            HAL_UART_Transmit(&huart2,
+                              (uint8_t *)msg,
+                              strlen(msg),
+                              100);
+        }
+    }
+
+    /* Mensaje de fin de escaneo */
+    char end_info[] = "Fin del escaneo.\r\n";
+    HAL_UART_Transmit(&huart2,
+                      (uint8_t *)end_info,
+                      sizeof(end_info) - 1,
+                      100);
 }

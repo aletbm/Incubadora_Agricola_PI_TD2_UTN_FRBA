@@ -1,0 +1,91 @@
+/*
+ * config.h
+ *
+ *  Created on: 12 dic. 2025
+ *      Author: Alexander
+ */
+
+#ifndef INC_CONFIG_H_
+#define INC_CONFIG_H_
+
+#define B1_Pin GPIO_PIN_13
+#define B1_GPIO_Port GPIOC
+
+#define ENCODER_A_Pin GPIO_PIN_0
+#define ENCODER_A_GPIO_Port GPIOC
+#define ENCODER_B_Pin GPIO_PIN_1
+#define ENCODER_B_GPIO_Port GPIOC
+#define ENCODER_B_EXTI_IRQn EXTI1_IRQn
+#define ENCODER_SW_Pin GPIO_PIN_0
+#define ENCODER_SW_GPIO_Port GPIOB
+
+#define USART_TX_Pin GPIO_PIN_2
+#define USART_TX_GPIO_Port GPIOA
+#define USART_RX_Pin GPIO_PIN_3
+#define USART_RX_GPIO_Port GPIOA
+#define LD2_Pin GPIO_PIN_5
+#define LD2_GPIO_Port GPIOA
+
+#define HUMIDIFICADOR_Pin GPIO_PIN_10
+#define HUMIDIFICADOR_GPIO_Port GPIOB
+#define BUZZER_Pin GPIO_PIN_12
+#define BUZZER_GPIO_Port GPIOB
+#define COOLER_Pin GPIO_PIN_8
+#define COOLER_GPIO_Port GPIOA
+#define LAMPARA_Pin GPIO_PIN_4
+#define LAMPARA_GPIO_Port GPIOB
+#define MOTOR_Pin GPIO_PIN_5
+#define MOTOR_GPIO_Port GPIOB
+#define MOTOR_SENSOR_PIN        GPIO_PIN_0
+#define MOTOR_SENSOR_PORT       GPIOA
+
+#define DHT11_Pin GPIO_PIN_11
+#define DHT11_GPIO_Port GPIOA
+
+#define TMS_Pin GPIO_PIN_13
+#define TMS_GPIO_Port GPIOA
+#define TCK_Pin GPIO_PIN_14
+#define TCK_GPIO_Port GPIOA
+#define SWO_Pin GPIO_PIN_3
+#define SWO_GPIO_Port GPIOB
+
+#define DEBOUNCE_POLL_RATE_MS   5
+#define DEBOUNCE_THRESHOLD      4
+#define LONG_PRESS_MS           2000
+#define LONG_PRESS_TICKS        (LONG_PRESS_MS / DEBOUNCE_POLL_RATE_MS)
+
+#define ENCODER_SLOTS           20
+#define MOTOR_CALC_INTERVAL_MS  1000
+
+#define DHT_READ_INTERVAL_MS    30000   // Leer sensor cada 30 seg
+#define CONTROL_LOOP_MS         1000    // Recalcular lógica cada 1 seg
+#define HUM_DOSE_TIME_MS        10000   // Humidificador ON 10 seg
+#define HUM_COOLDOWN_TIME_MS    300000  // Espera 5 min
+
+//ETAPA 1 -> Hasta los primeros 18 dias de incubacion.
+//ETAPA 2 -> Desde el dia 18 hasta el dia 21.
+
+#define	TEMP_ETAPA1_MAX_CRITICA	40
+#define	TEMP_ETAPA1_MAX_TOLERABLE	38
+#define	TEMP_ETAPA1_MIN_TOLERABLE	37
+#define	TEMP_ETAPA1_MIN_CRITICA	35
+
+#define	TEMP_ETAPA2_MAX_CRITICA	38
+#define	TEMP_ETAPA2_MAX_TOLERABLE	36
+#define	TEMP_ETAPA2_MIN_TOLERABLE	35
+#define	TEMP_ETAPA2_MIN_CRITICA	33
+
+#define	HUMEDAD_ETAPA1_MAX_CRITICA	75
+#define	HUMEDAD_ETAPA1_MAX_TOLERABLE	60
+#define	HUMEDAD_ETAPA1_MIN_TOLERABLE	55
+#define	HUMEDAD_ETAPA1_MIN_CRITICA	40
+
+#define	HUMEDAD_ETAPA2_MAX_CRITICA	80
+#define	HUMEDAD_ETAPA2_MAX_TOLERABLE	75
+#define	HUMEDAD_ETAPA2_MIN_TOLERABLE	70
+#define	HUMEDAD_ETAPA2_MIN_CRITICA	60
+
+#define TIEMPO_ALARMA_MS	1800000	//30 min
+#define TIEMPO_ALARMA_CRITICA_MS	3600000	//1 hora
+
+#endif /* INC_CONFIG_H_ */

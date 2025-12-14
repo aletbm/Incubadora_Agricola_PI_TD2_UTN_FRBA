@@ -22,91 +22,21 @@
 #include <string.h> // Necesario para memcpy
 #include "FreeRTOS.h"
 #include "task.h"
+#include "eeprom.h"
+#include "utils.h"
+#include "config.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum {
-    ENCODER_RIGHT,
-    ENCODER_LEFT,
-    BUTTON_PRESS,
-    BUTTON_LONG_PRESS
-} MenuEvent_t;
 
-typedef struct {
-    char* name;          // Nombre a mostrar
-    uint8_t state;       // 0 = OFF, 1 = ON
-    GPIO_TypeDef* port;  // Puerto GPIO
-    uint16_t pin;        // Pin GPIO
-} OutputControl_t;
-
-typedef enum {
-    UI_MODE_DASHBOARD,
-    UI_MODE_MAIN_MENU,
-    UI_MODE_TEST_MENU,
-    UI_MODE_CONFIG_EDIT
-} UIMode_t;
-
-typedef enum {
-    HUM_STATE_IDLE,      // Esperando
-    HUM_STATE_DOSING,    // Inyectando humedad
-    HUM_STATE_COOLDOWN   // Esperando estabilización
-} HumidifierState_t;
-
-typedef struct {
-    char name[12];      // "DESARROLLO"
-    uint8_t end_day;    // Fin de etapa (ej. 18)
-    float temp_target;  // Ej. 37.7
-    float hum_target;   // Ej. 55.0
-    uint8_t motor_on;   // 1 = Volteo activo
-} StageConfig_t;
-
-typedef struct {
-    uint8_t total_days;      // Ciclo total (21)
-    StageConfig_t stages[2]; // [0]=Desarrollo, [1]=Eclosión
-
-    // Estado Persistente
-    uint8_t is_running;         // 0=Stop, 1=Run
-    uint32_t saved_timestamp;   // Minutos acumulados guardados
-    uint32_t last_boot_tick;    // Referencia de tiempo (HAL_GetTick)
-
-    // Auxiliar UI
-    uint8_t current_stage_idx;  // Qué etapa estamos editando
-} IncubatorData_t;
-
-
+HumidifierState_t hum_state = HUM_STATE_IDLE;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-#define DEBOUNCE_POLL_RATE_MS   5
-#define DEBOUNCE_THRESHOLD      4
-#define LCD_ROWS 2
-
-// --- NUEVOS DEFINES (ESTABILIDAD & MOTOR) ---
-#define LONG_PRESS_MS           2000
-#define LONG_PRESS_TICKS        (LONG_PRESS_MS / DEBOUNCE_POLL_RATE_MS)
-#define LCD_COMMAND_DELAY       5
-#define MIN_DRAW_INTERVAL_MS    50
-
-// --- CONFIG MOTOR (PA0) ---
-#define MOTOR_SENSOR_PIN        GPIO_PIN_0
-#define MOTOR_SENSOR_PORT       GPIOA
-#define ENCODER_SLOTS           20
-#define MOTOR_CALC_INTERVAL_MS  1000
-
-// --- CONTROL DEFINES ---
-#define DHT_READ_INTERVAL_MS    30000   // Leer sensor cada 30 seg
-#define CONTROL_LOOP_MS         1000    // Recalcular lógica cada 1 seg
-#define HUM_DOSE_TIME_MS        10000   // Humidificador ON 10 seg
-#define HUM_COOLDOWN_TIME_MS    300000  // Espera 5 min
-
-// EEPROM --------------
-
-#define FLASH_USER_START_ADDR 0x08060000 // Sector 7 (F446RE)
-
 
 /* USER CODE END PD */
 
@@ -126,26 +56,16 @@ UART_HandleTypeDef huart2;
 osThreadId menuTaskHandle;
 osThreadId debounceTaskHandle;
 osThreadId MotorTaskHandle;
+osThreadId ControlTaskHandle; // Handle para la nueva tarea
 osMessageQId menuQueueHandle;
+
 /* USER CODE BEGIN PV */
-// --- TUS VARIABLES ORIGINALES (Menú Simple) ---
-char* menu_items[] = {"Ver Sensores", "Configuracion", "TEST"};
-int8_t selected_item = 0;
-const int8_t menu_size = 3;
-int8_t menu_top_item = 0;
 
 // --- VARIABLES DE SISTEMA ---
-UIMode_t current_ui_mode = UI_MODE_DASHBOARD;
 volatile uint32_t motor_pulse_count = 0;
 uint16_t global_rpm = 0;
 
-// Variables Config Edit
-int8_t config_item = 0;
-int8_t is_editing_val = 0;
-
 // --- VARIABLES DE CONTROL ---
-float current_temp = 0.0f;
-float current_hum = 0.0f;
 float last_valid_temp = 0.0f;
 float last_valid_hum = 0.0f;
 uint32_t last_dht_read_time = 0;
@@ -159,287 +79,616 @@ static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
-void StartMenuTask(void const * argument);
-void StartDebounceTask(void const * argument);
-void StartMotorTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
-void I2C_Scan(void);
-void Enable_Internal_Pullups(void);
-void recover_lcd(void);
-void update_display(void);
-void render_dashboard(void);
-void render_menu(void);
-void render_test_menu(void);
-void render_config_edit(void);
-void toggle_output(int index);
-
-void Load_Config_From_Flash(void);
-void Save_Config_To_Flash(void);
-
-uint8_t Get_Current_Day(void);
-void Get_Active_Targets(float *temp, float *hum, uint8_t *motor_on);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-// --- FUNCIONES AUXILIARES ---
-
-void Enable_Internal_Pullups(void) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-}
-
-void recover_lcd(void) {
-    HD44780_Init(2);
-    HD44780_Clear();
-    osDelay(50);
-    HD44780_SetCursor(0, 0);
-    HD44780_PrintStr("! PANIC RESET ! ");
-    osDelay(1000);
-    HD44780_Clear();
-    update_display();
-}
-
-void I2C_Scan(void) {
-    char info[] = "Escaneando bus I2C...\r\n";
-    HAL_UART_Transmit(&huart2, (uint8_t*)info, sizeof(info) - 1, 100);
-    HAL_StatusTypeDef res;
-    for(uint16_t i = 0; i < 128; i++) {
-        res = HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(i << 1), 1, 10);
-        if(res == HAL_OK) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "-> Disp: 0x%02X\r\n", i);
-            HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-        }
-    }
-    char end_info[] = "Fin del escaneo.\r\n";
-    HAL_UART_Transmit(&huart2, (uint8_t*)end_info, sizeof(end_info) - 1, 100);
-}
-
-// --- GESTIÓN DE MEMORIA FLASH (PERSISTENCIA) ---
-
-void Load_Config_From_Flash(void) {
-    IncubatorData_t *flash_data = (IncubatorData_t *)FLASH_USER_START_ADDR;
-
-    // Chequeamos si la memoria está virgen (0xFF) o corrupta
-    if (flash_data->total_days == 0xFF || flash_data->stages[0].temp_target > 100.0f) {
-        // --- VALORES DE F�?BRICA ---
-        sysData.total_days = 21;
-
-        // Etapa 0: Desarrollo
-        snprintf(sysData.stages[0].name, 12, "DESARROLLO");
-        sysData.stages[0].end_day = 18;
-        sysData.stages[0].temp_target = 37.7f;
-        sysData.stages[0].hum_target = 55.0f;
-        sysData.stages[0].motor_on = 1;
-
-        // Etapa 1: Eclosión
-        snprintf(sysData.stages[1].name, 12, "ECLOSION");
-        sysData.stages[1].end_day = 21;
-        sysData.stages[1].temp_target = 37.2f;
-        sysData.stages[1].hum_target = 70.0f;
-        sysData.stages[1].motor_on = 0;
-
-        sysData.is_running = 0;
-        sysData.saved_timestamp = 0;
-    } else {
-        // Copiar datos guardados a RAM
-        memcpy(&sysData, flash_data, sizeof(IncubatorData_t));
-    }
-    sysData.last_boot_tick = HAL_GetTick();
-}
-
-void Save_Config_To_Flash(void) {
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef EraseInitStruct;
-    uint32_t SectorError = 0;
-
-    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    EraseInitStruct.Sector = FLASH_SECTOR_7;
-    EraseInitStruct.NbSectors = 1;
-
-    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
-        HAL_FLASH_Lock();
-        return;
-    }
-
-    uint32_t address = FLASH_USER_START_ADDR;
-    uint32_t *data_ptr = (uint32_t *)&sysData;
-
-    // Actualizar tiempo acumulado antes de guardar
-    if (sysData.is_running) {
-        uint32_t current_session_min = (HAL_GetTick() - sysData.last_boot_tick) / 60000;
-        sysData.saved_timestamp += current_session_min;
-        sysData.last_boot_tick = HAL_GetTick();
-    }
-
-    for (int i = 0; i < sizeof(IncubatorData_t); i += 4) {
-        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address, *data_ptr);
-        address += 4;
-        data_ptr++;
-    }
-    HAL_FLASH_Lock();
-}
-
-// --- LÓGICA DE TIEMPO ---
-
-uint8_t Get_Current_Day(void) {
-    if (!sysData.is_running) return 0;
-    uint32_t session_mins = (HAL_GetTick() - sysData.last_boot_tick) / 60000;
-    uint32_t total_mins = sysData.saved_timestamp + session_mins;
-    uint8_t day = (total_mins / 1440) + 1; // 1440 min = 1 dia
-    return day;
-}
-
-void Get_Active_Targets(float *temp, float *hum, uint8_t *motor_on) {
-    uint8_t day = Get_Current_Day();
-    if (day == 0) {
-        *temp = 0; *hum = 0; *motor_on = 0;
-        return;
-    }
-    // Si estamos en etapa de desarrollo
-    if (day <= sysData.stages[0].end_day) {
-        *temp = sysData.stages[0].temp_target;
-        *hum = sysData.stages[0].hum_target;
-        *motor_on = sysData.stages[0].motor_on;
-    }
-    else {
-        // Eclosión o fin
-        *temp = sysData.stages[1].temp_target;
-        *hum = sysData.stages[1].hum_target;
-        *motor_on = sysData.stages[1].motor_on;
-    }
-}
-
-// --- HARDWARE HELPERS ---
-void toggle_output(int index) {
-    if(index < 0 || index >= test_menu_size) return;
-    test_outputs[index].state = !test_outputs[index].state;
-    HAL_GPIO_WritePin(test_outputs[index].port, test_outputs[index].pin,
-                      test_outputs[index].state ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-
-// --- RENDERIZADO DASHBOARD (RPM) ---
-void render_dashboard(void) {
-    char buffer[20];
-    float target_t = 0; float target_h = 0; uint8_t mon = 0;
-
-    if (sysData.is_running) {
-        Get_Active_Targets(&target_t, &target_h, &mon);
-        // T:37.7/37.7
-        snprintf(buffer, sizeof(buffer), "T:%04.1f/%04.1f    ", current_temp, target_t);
-    } else {
-        snprintf(buffer, sizeof(buffer), "T:%04.1f (PAUSA) ", current_temp);
-    }
-
-    HD44780_SetCursor(0, 0);
-    HD44780_PrintStr(buffer);
-
-    // Línea 2
-    char hum_char = ' ';
-    if (hum_state == HUM_STATE_DOSING) hum_char = '*';
-    if (hum_state == HUM_STATE_COOLDOWN) hum_char = 'w';
-
-    if (sysData.is_running) {
-        snprintf(buffer, sizeof(buffer), "H:%02.0f%% %c D:%d  ", current_hum, hum_char, Get_Current_Day());
-    } else {
-        snprintf(buffer, sizeof(buffer), "H:%02.0f%% STANDBY ", current_hum);
-    }
-
-    HD44780_SetCursor(0, 1);
-    HD44780_PrintStr(buffer);
-}
-
-// --- RENDERIZADO MENÚ (Tu lógica original segura) ---
-void render_menu(void) {
-    char line_buffer[32];
-    for (int i = 0; i < LCD_ROWS; i++) {
-        int item_index = menu_top_item + i;
-        if (item_index < menu_size) {
-            char cursor = (item_index == selected_item) ? '>' : ' ';
-            // Se usa tu array de char* menu_items
-            snprintf(line_buffer, sizeof(line_buffer), "%c%-15.15s", cursor, menu_items[item_index]);
-        } else {
-            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
-        }
-        HD44780_SetCursor(0, i);
-        HD44780_PrintStr(line_buffer);
-        // ELIMINADO: osDelay(LCD_COMMAND_DELAY); (Causa problemas en critical section)
-    }
-}
-
-void render_test_menu(void) {
-    char line_buffer[20];
-    for (int i = 0; i < LCD_ROWS; i++) {
-        int item_index = test_top_item + i;
-        if (item_index < test_menu_size) {
-            char cursor = (item_index == test_selected_item) ? '>' : ' ';
-            char state_char = (test_outputs[item_index].state) ? 'X' : ' ';
-            snprintf(line_buffer, sizeof(line_buffer), "%c[%c] %-9s",
-                     cursor, state_char, test_outputs[item_index].name);
-        } else {
-            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
-        }
-        HD44780_SetCursor(0, i);
-        HD44780_PrintStr(line_buffer);
-    }
-}
-
-void render_config_edit(void) {
-    char line1[20];
-    char line2[20];
-    StageConfig_t *stage = &sysData.stages[sysData.current_stage_idx];
-
-    // L1: Título
-    snprintf(line1, sizeof(line1), "CFG: %s", stage->name);
-
-    // L2: Parámetro
-    char value_str[12];
-    switch(config_item) {
-        case 0: snprintf(value_str, sizeof(value_str), "FinDia:%d", stage->end_day); break;
-        case 1: snprintf(value_str, sizeof(value_str), "T:%.1f", stage->temp_target); break;
-        case 2: snprintf(value_str, sizeof(value_str), "H:%.0f%%", stage->hum_target); break;
-        case 3: snprintf(value_str, sizeof(value_str), "Mot:%s", stage->motor_on ? "ON" : "OFF"); break;
-        case 4: snprintf(value_str, sizeof(value_str), "[SALIR]"); break;
-    }
-
-    if (is_editing_val && config_item != 4) {
-        snprintf(line2, sizeof(line2), "%s <ADJ>", value_str);
-    } else {
-        snprintf(line2, sizeof(line2), "%c %s", (config_item == 4 ? '>' : ' '), value_str);
-    }
-
-    HD44780_SetCursor(0, 0);
-    HD44780_PrintStr(line1);
-    HD44780_SetCursor(0, 1);
-    HD44780_PrintStr(line2);
-}
-
-void update_display()
+/**
+ * @brief Tarea de debounce y detección de pulsaciones del botón del encoder.
+ *
+ * Esta tarea implementa un debounce por integrador digital y detecta:
+ *  - Pulsación corta (BUTTON_PRESS)
+ *  - Pulsación larga (BUTTON_LONG_PRESS)
+ *
+ * Funciona mediante sondeo periódico (polling) y envía eventos a la
+ * cola del menú para ser procesados por la tarea de UI.
+ *
+ * Ventajas del enfoque:
+ *  - No bloquea interrupciones
+ *  - Filtrado robusto de rebotes mecánicos
+ *  - Detección confiable de pulsación larga
+ *
+ * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ */
+void StartDebounceTask(void const * argument)
 {
-    taskENTER_CRITICAL();
-    if (current_ui_mode == UI_MODE_DASHBOARD) {
-        render_dashboard();
-    } else if (current_ui_mode == UI_MODE_MAIN_MENU) {
-        render_menu();
-    } else if (current_ui_mode == UI_MODE_TEST_MENU) {
-        render_test_menu();
-    } else if (current_ui_mode == UI_MODE_CONFIG_EDIT) {
-        render_config_edit();
+    /* Integrador digital para debounce:
+       incrementa cuando el botón está presionado,
+       decrementa cuando está liberado */
+    uint8_t integrator = 0;
+
+    /* Estado anterior del botón:
+       1 = liberado
+       0 = presionado */
+    uint8_t prev_state = 1;
+
+    /* Contador de tiempo de pulsación (para long press) */
+    uint32_t hold_counter = 0;
+
+    /* Flag para evitar reenviar múltiples eventos de pulsación larga */
+    uint8_t long_press_sent = 0;
+
+    for (;;)
+    {
+        /* Periodo de muestreo del botón */
+        osDelay(DEBOUNCE_POLL_RATE_MS);
+
+        /* Lectura del pin del botón (activo en nivel bajo) */
+        uint8_t pin_state = HAL_GPIO_ReadPin(
+                                ENCODER_SW_GPIO_Port,
+                                ENCODER_SW_Pin);
+
+        /* ================= DEBOUNCE POR INTEGRADOR ================= */
+
+        if (pin_state == GPIO_PIN_RESET) {
+            /* Botón presionado → integrar hacia arriba */
+            if (integrator < DEBOUNCE_THRESHOLD)
+                integrator++;
+        } else {
+            /* Botón liberado → integrar hacia abajo */
+            if (integrator > 0)
+                integrator--;
+        }
+
+        /* ================= DETECCIÓN DE EVENTOS ================= */
+
+        /* ---- Transición: LIBERADO → PRESIONADO ---- */
+        if (integrator >= DEBOUNCE_THRESHOLD && prev_state == 1) {
+
+            prev_state = 0;        // Nuevo estado: presionado
+            hold_counter = 0;      // Reiniciar contador de hold
+            long_press_sent = 0;   // Habilitar detección de long press
+
+            /* Enviar evento de pulsación corta */
+            MenuEvent_t event = BUTTON_PRESS;
+            osMessagePut(menuQueueHandle, (uint32_t)event, 0);
+        }
+
+        /* ---- Botón mantenido presionado ---- */
+        else if (prev_state == 0 && integrator >= DEBOUNCE_THRESHOLD) {
+
+            hold_counter++;
+
+            /* Detectar pulsación larga */
+            if (hold_counter >= LONG_PRESS_TICKS &&
+                long_press_sent == 0)
+            {
+                long_press_sent = 1;
+
+                MenuEvent_t event = BUTTON_LONG_PRESS;
+                osMessagePut(menuQueueHandle, (uint32_t)event, 0);
+            }
+        }
+
+        /* ---- Transición: PRESIONADO → LIBERADO ---- */
+        else if (integrator == 0 && prev_state == 0) {
+
+            prev_state = 1;        // Volver a estado liberado
+        }
     }
-    taskEXIT_CRITICAL();
 }
+
+/**
+ * @brief Tarea principal de gestión de menú e interfaz de usuario.
+ *
+ * Esta tarea maneja:
+ *  - Eventos del encoder rotativo y botón
+ *  - Navegación entre modos de UI
+ *  - Edición de parámetros del sistema
+ *  - Actualización eficiente del LCD (update-on-change)
+ *
+ * La comunicación con las ISR se realiza mediante una cola RTOS.
+ *
+ * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ */
+void StartMenuTask(void const * argument)
+{
+    /* Inicializa la pantalla al arrancar la tarea */
+    update_display();
+
+    osEvent event;
+    uint32_t last_draw_time = 0;   // Último refresco del LCD
+    int needs_update = 0;          // Flag para redibujar pantalla
+
+    /* Variables para actualización solo ante cambios (Dashboard) */
+    float last_disp_temp = -999.0f;
+    float last_disp_hum  = -999.0f;
+    uint16_t last_disp_rpm = 9999;
+    HumidifierState_t last_disp_hum_state = HUM_STATE_IDLE;
+    uint8_t last_disp_day = 255;
+    uint8_t last_disp_is_running = 255;
+    uint8_t last_disp_hour = 255;
+
+    for (;;)
+    {
+        /* Espera evento del menú (encoder / botón)
+           Timeout de 200 ms para permitir refresco periódico */
+        event = osMessageGet(menuQueueHandle, 200);
+
+        /* ================= EVENTO RECIBIDO ================= */
+        if (event.status == osEventMessage) {
+
+            MenuEvent_t initial_event = (MenuEvent_t)event.value.v;
+
+            /* -------- BOTÓN: PRESIÓN LARGA (volver atrás) -------- */
+            if (initial_event == BUTTON_LONG_PRESS) {
+
+                if (current_ui_mode == UI_MODE_TEST_MENU ||
+                    current_ui_mode == UI_MODE_CONFIG_EDIT ||
+                    current_ui_mode == UI_MODE_CONFIG_GLOBAL ||
+                    current_ui_mode == UI_MODE_CONFIG_TIME)
+                {
+                    current_ui_mode = UI_MODE_MAIN_MENU;
+                }
+                else if (current_ui_mode == UI_MODE_CONFIG_SELECT) {
+                    current_ui_mode = UI_MODE_MAIN_MENU;
+                }
+                else if (current_ui_mode == UI_MODE_MAIN_MENU) {
+                    current_ui_mode = UI_MODE_DASHBOARD;
+                }
+
+                needs_update = 1;
+                continue; // Saltear procesamiento del evento
+            }
+
+            /* -------- PROCESAMIENTO DE MOVIMIENTO -------- */
+            int8_t net_movement = 0;
+            int button_pressed = 0;
+
+            if (initial_event == ENCODER_RIGHT) net_movement++;
+            else if (initial_event == ENCODER_LEFT) net_movement--;
+            else if (initial_event == BUTTON_PRESS) button_pressed = 1;
+
+            /* Acumula eventos rápidos del encoder (anti-lag UI) */
+            int batch_limit = 20;
+            while (batch_limit-- > 0 &&
+                   (event = osMessageGet(menuQueueHandle, 0)).status == osEventMessage)
+            {
+                MenuEvent_t batch_evt = (MenuEvent_t)event.value.v;
+                if (batch_evt == ENCODER_RIGHT) net_movement++;
+                else if (batch_evt == ENCODER_LEFT) net_movement--;
+            }
+
+            /* ================= LÓGICA DE INTERFAZ ================= */
+
+            /* -------- DASHBOARD -------- */
+            if (current_ui_mode == UI_MODE_DASHBOARD) {
+                if (button_pressed) {
+                    current_ui_mode = UI_MODE_MAIN_MENU;
+                    selected_item = 0;
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- MENÚ PRINCIPAL -------- */
+            else if (current_ui_mode == UI_MODE_MAIN_MENU) {
+
+                if (net_movement != 0) {
+                    int16_t new_pos = selected_item + net_movement;
+                    selected_item = ((new_pos % menu_size) + menu_size) % menu_size;
+
+                    if (selected_item >= menu_top_item + LCD_ROWS)
+                        menu_top_item = selected_item - (LCD_ROWS - 1);
+                    else if (selected_item < menu_top_item)
+                        menu_top_item = selected_item;
+
+                    needs_update = 1;
+                }
+
+                if (button_pressed) {
+
+                    if (selected_item == 1) { // INICIAR / PAUSAR
+                        if (sysData.is_running) {
+                            Save_Config_To_Flash();
+                            sysData.is_running = 0;
+                            Save_Config_To_Flash();
+                        } else {
+                            sysData.is_running = 1;
+                            sysData.last_boot_tick = HAL_GetTick();
+                            Save_Config_To_Flash();
+                        }
+                    }
+                    else if (selected_item == 2) {
+                        current_ui_mode = UI_MODE_CONFIG_SELECT;
+                        config_sel_index = 0;
+                        config_top_index = 0;
+                    }
+                    else if (selected_item == 3) {
+                        current_ui_mode = UI_MODE_TEST_MENU;
+                        test_selected_item = 0;
+                    }
+                    else {
+                        current_ui_mode = UI_MODE_DASHBOARD;
+                    }
+
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- MENÚ DE TEST -------- */
+            else if (current_ui_mode == UI_MODE_TEST_MENU) {
+
+                if (net_movement != 0) {
+                    int16_t new_pos = test_selected_item + net_movement;
+                    test_selected_item = ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
+
+                    if (test_selected_item >= test_top_item + LCD_ROWS)
+                        test_top_item = test_selected_item - (LCD_ROWS - 1);
+                    else if (test_selected_item < test_top_item)
+                        test_top_item = test_selected_item;
+
+                    needs_update = 1;
+                }
+
+                if (button_pressed) {
+                    toggle_output(test_selected_item);
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- SELECCIÓN DE CONFIGURACIÓN -------- */
+            else if (current_ui_mode == UI_MODE_CONFIG_SELECT) {
+
+                if (net_movement != 0) {
+                    int16_t new_pos = config_sel_index + net_movement;
+                    config_sel_index = ((new_pos % config_menu_sz) + config_menu_sz) % config_menu_sz;
+
+                    if (config_sel_index >= config_top_index + LCD_ROWS)
+                        config_top_index = config_sel_index - (LCD_ROWS - 1);
+                    else if (config_sel_index < config_top_index)
+                        config_top_index = config_sel_index;
+
+                    needs_update = 1;
+                }
+
+                if (button_pressed) {
+                    if (config_sel_index <= 1) {
+                        sysData.current_stage_idx = config_sel_index;
+                        current_ui_mode = UI_MODE_CONFIG_EDIT;
+                        config_item = 0;
+                        is_editing_val = 0;
+                    }
+                    else if (config_sel_index == 2) {
+                        current_ui_mode = UI_MODE_CONFIG_GLOBAL;
+                        config_item = 0;
+                        is_editing_val = 0;
+                    }
+                    else if (config_sel_index == 3) {
+                        current_ui_mode = UI_MODE_CONFIG_TIME;
+                        config_item = 0;
+                        is_editing_val = 0;
+
+                        edit_day = Get_Current_Day();
+                        if (edit_day == 0) edit_day = 1;
+                        edit_hour = Get_Current_Hour();
+                        edit_min  = Get_Current_Minute();
+                    }
+                    else {
+                        current_ui_mode = UI_MODE_MAIN_MENU;
+                    }
+
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- CONFIGURACIÓN DE TIEMPO -------- */
+            else if (current_ui_mode == UI_MODE_CONFIG_TIME) {
+
+                if (button_pressed) {
+                    if (config_item == 3) {
+                        uint32_t new_total_mins =
+                            ((uint32_t)(edit_day - 1) * 1440) +
+                            ((uint32_t)edit_hour * 60) +
+                            (uint32_t)edit_min;
+
+                        sysData.saved_timestamp = new_total_mins;
+                        sysData.last_boot_tick = HAL_GetTick();
+                        Save_Config_To_Flash();
+                        current_ui_mode = UI_MODE_CONFIG_SELECT;
+                    }
+                    else {
+                        is_editing_val = !is_editing_val;
+                    }
+                    needs_update = 1;
+                }
+
+                if (net_movement != 0) {
+                    if (!is_editing_val) {
+                        config_item += net_movement;
+                        if (config_item < 0) config_item = 3;
+                        if (config_item > 3) config_item = 0;
+                    }
+                    else {
+                        if (config_item == 0) {
+                            edit_day += net_movement;
+                            if (edit_day < 1) edit_day = 1;
+                        }
+                        else if (config_item == 1) {
+                            edit_hour = (edit_hour + net_movement + 24) % 24;
+                        }
+                        else if (config_item == 2) {
+                            edit_min = (edit_min + net_movement + 60) % 60;
+                        }
+                    }
+                    needs_update = 1;
+                }
+            }
+        }
+
+        /* ================= TIMEOUT (UPDATE-ON-CHANGE) ================= */
+        else if (event.status == osEventTimeout) {
+
+            if (current_ui_mode == UI_MODE_DASHBOARD) {
+
+                uint8_t day  = Get_Current_Day();
+                uint8_t hour = Get_Current_Hour();
+
+                if (liveStatus.temp_current != last_disp_temp ||
+                    liveStatus.hum_current  != last_disp_hum  ||
+                    liveStatus.rpm_current  != last_disp_rpm  ||
+                    hum_state               != last_disp_hum_state ||
+                    day                     != last_disp_day ||
+                    hour                    != last_disp_hour ||
+                    sysData.is_running      != last_disp_is_running)
+                {
+                    needs_update = 1;
+                }
+            }
+        }
+
+        /* ================= DIBUJO CONTROLADO ================= */
+        uint32_t current_time = HAL_GetTick();
+
+        if (needs_update &&
+            (current_time - last_draw_time >= MIN_DRAW_INTERVAL_MS))
+        {
+            if (current_ui_mode == UI_MODE_DASHBOARD) {
+                last_disp_temp = liveStatus.temp_current;
+                last_disp_hum  = liveStatus.hum_current;
+                last_disp_rpm  = liveStatus.rpm_current;
+                last_disp_hum_state = hum_state;
+                last_disp_day  = Get_Current_Day();
+                last_disp_hour = Get_Current_Hour();
+                last_disp_is_running = sysData.is_running;
+            }
+
+            update_display();
+            last_draw_time = current_time;
+            needs_update = 0;
+        }
+    }
+}
+
+
+/**
+ * @brief Tarea de cálculo de RPM del motor.
+ *
+ * Esta tarea se ejecuta periódicamente y calcula la velocidad del motor
+ * en RPM a partir de los pulsos generados por un sensor o encoder.
+ *
+ * Funcionamiento:
+ *  - La interrupción incrementa `motor_pulse_count`
+ *  - Esta tarea toma un snapshot del contador de forma atómica
+ *  - Calcula las RPM según el intervalo de muestreo
+ *  - Actualiza variables globales y de estado en tiempo real
+ *
+ * El uso de una sección crítica garantiza coherencia de datos entre
+ * interrupciones y contexto de tarea.
+ *
+ * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ */
+void StartMotorTask(void const * argument)
+{
+    /* Variable local para capturar los pulsos acumulados
+       durante el intervalo de medición */
+    uint32_t pulses_snapshot = 0;
+
+    for (;;)
+    {
+        /* Espera fija entre cálculos de RPM */
+        osDelay(MOTOR_CALC_INTERVAL_MS);
+
+        /* ================= SECCIÓN CRÍTICA =================
+           Protege el acceso a motor_pulse_count, que es
+           modificada desde una ISR (EXTI / sensor de motor) */
+        taskENTER_CRITICAL();
+        pulses_snapshot = motor_pulse_count;  // Copia atómica
+        motor_pulse_count = 0;                 // Reinicio del contador
+        taskEXIT_CRITICAL();
+        /* =================================================== */
+
+        /* Cálculo de RPM:
+           pulses_snapshot  → pulsos en el intervalo
+           ENCODER_SLOTS    → pulsos por revolución
+           MOTOR_CALC_INTERVAL_MS → ventana de tiempo en ms
+
+           Fórmula:
+           RPM = (pulsos * 60s * 1000ms) / (slots * intervalo_ms)
+        */
+        uint32_t calculated_rpm =
+            (pulses_snapshot * 60 * 1000) /
+            (ENCODER_SLOTS * MOTOR_CALC_INTERVAL_MS);
+
+        /* Guardar RPM calculada (limitada a 16 bits) */
+        global_rpm = (uint16_t)calculated_rpm;
+
+        /* Actualizar estructura de estado en tiempo real
+           utilizada por el dashboard / UI */
+        liveStatus.rpm_current = global_rpm;
+    }
+}
+
+/**
+ * @brief Tarea principal de control ambiental de la incubadora.
+ *
+ * Esta tarea implementa el lazo de control de:
+ *  - Temperatura (lámpara calefactora + cooler)
+ *  - Humedad (humidificador ultrasónico)
+ *  - Actualización de variables de estado en tiempo real
+ *
+ * El control se basa en:
+ *  - Histéresis y soft-PWM para temperatura
+ *  - Máquina de estados temporizada para humedad
+ *
+ * Todas las salidas son Active-Low:
+ *  - GPIO_PIN_RESET → dispositivo encendido
+ *  - GPIO_PIN_SET   → dispositivo apagado
+ *
+ * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ */
+void StartControlTask(void const * argument)
+{
+    /* ============================================================
+       INICIALIZACIÓN SEGURA
+       Asegura que todos los actuadores estén apagados al inicio
+       (Active Low → HIGH = OFF)
+       ============================================================ */
+    HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET); // Cooler OFF
+    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_SET); // Humidificador OFF
+    HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET); // Lámpara OFF
+    HAL_GPIO_WritePin(test_outputs[3].port, test_outputs[3].pin, GPIO_PIN_SET); // Motor OFF
+
+    /* Variables de control */
+    float target_t = 0;          // Temperatura objetivo
+    float target_h = 0;          // Humedad objetivo
+    uint8_t motor_enabled = 0;   // Estado del motor (etapa)
+    uint32_t hum_timer_start = 0;// Temporizador máquina de humedad
+
+    for (;;)
+    {
+        uint32_t now = HAL_GetTick();
+
+        /* ============================================================
+           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL DÍA DE INCUBACIÓN
+           ============================================================ */
+        Get_Active_Targets(&target_t, &target_h, &motor_enabled);
+
+        /* Actualización de información en tiempo real (UI / Debug) */
+        liveStatus.day_current  = Get_Current_Day();
+        liveStatus.hour_current = Get_Current_Hour();
+        liveStatus.temp_target  = target_t;
+        liveStatus.hum_target   = target_h;
+
+        /* Si el sistema está pausado o fuera de ciclo,
+           no se ejecuta control activo */
+        if (target_t == 0) {
+            osDelay(1000);
+            continue;
+        }
+
+        /* ============================================================
+           2. LECTURA DE SENSOR (SIMULADA / REAL)
+           Se ejecuta cada DHT_READ_INTERVAL_MS
+           ============================================================ */
+        if ((now - last_dht_read_time) >= DHT_READ_INTERVAL_MS) {
+
+            /* SIMULACIÓN DE TEMPERATURA
+               (Reemplazar por DHT11_Read / DHT22_Read) */
+
+            // Si la lámpara está encendida → sube la temperatura
+            if (HAL_GPIO_ReadPin(test_outputs[2].port, test_outputs[2].pin) == GPIO_PIN_RESET) {
+                last_valid_temp += 0.2f;
+            } else {
+                last_valid_temp -= 0.1f;
+            }
+
+            /* Límite inferior de seguridad */
+            if (last_valid_temp < 20.0f)
+                last_valid_temp = 20.0f;
+
+            /* Actualizar valores globales de estado */
+            liveStatus.temp_current = last_valid_temp;
+            liveStatus.hum_current  = last_valid_hum;
+
+            last_dht_read_time = now;
+        }
+
+        /* ============================================================
+           3. CONTROL DE TEMPERATURA
+           - Histéresis
+           - Soft PWM en zona muerta
+           ============================================================ */
+        float error_temp = target_t - last_valid_temp;
+
+        if (error_temp > 0.5f) {
+            /* Muy frío → Lámpara ON, Cooler OFF */
+            HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET);
+        }
+        else if (error_temp > 0.0f && error_temp <= 0.5f) {
+            /* Zona de regulación suave (Soft PWM 15s) */
+            if ((now - last_dht_read_time) < 15000) {
+                HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_RESET); // ON
+            } else {
+                HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET);   // OFF
+            }
+        }
+        else {
+            /* Temperatura alcanzada o excedida */
+            HAL_GPIO_WritePin(test_outputs[2].port, test_outputs[2].pin, GPIO_PIN_SET); // Lámpara OFF
+
+            /* Protección térmica con ventilación */
+            if (last_valid_temp > (target_t + 1.0f)) {
+                HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_RESET); // Cooler ON
+            } else {
+                HAL_GPIO_WritePin(test_outputs[0].port, test_outputs[0].pin, GPIO_PIN_SET);   // Cooler OFF
+            }
+        }
+
+        /* ============================================================
+           4. CONTROL DE HUMEDAD
+           Máquina de estados temporizada
+           ============================================================ */
+        switch (hum_state) {
+
+            case HUM_STATE_IDLE:
+                /* Humedad baja → iniciar dosificación */
+                if (last_valid_hum < (target_h - 5.0f)) {
+                    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_RESET); // ON
+                    hum_timer_start = now;
+                    hum_state = HUM_STATE_DOSING;
+                }
+                break;
+
+            case HUM_STATE_DOSING:
+                /* Tiempo máximo de inyección de humedad */
+                if ((now - hum_timer_start) >= HUM_DOSE_TIME_MS) {
+                    HAL_GPIO_WritePin(test_outputs[1].port, test_outputs[1].pin, GPIO_PIN_SET); // OFF
+                    hum_timer_start = now;
+                    hum_state = HUM_STATE_COOLDOWN;
+                }
+                break;
+
+            case HUM_STATE_COOLDOWN:
+                /* Tiempo de estabilización antes de volver a medir */
+                if ((now - hum_timer_start) >= HUM_COOLDOWN_TIME_MS) {
+                    hum_state = HUM_STATE_IDLE;
+                }
+                break;
+        }
+
+        /* ============================================================
+           5. RETARDO DEL LAZO DE CONTROL
+           ============================================================ */
+        osDelay(CONTROL_LOOP_MS);
+    }
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -483,16 +732,11 @@ int main(void)
   // Cargar configuración guardada
   Load_Config_From_Flash();
 
-  HD44780_Init(2);
-  HD44780_Clear();
-
-  HD44780_SetCursor(0, 0);
-  HD44780_PrintStr("TDII: INCUBADORA");
-
-
-  HAL_Delay(1000);
-  HD44780_SetCursor(0, 0);
-  HD44780_PrintStr("                ");
+  LCD_ShowWelcome(
+		  LCD_ROWS,            // Filas
+		  "TDII: INCUBADORA",  // Mensaje
+		  1000                 // 1 segundo
+  );
 
   /* USER CODE END 2 */
 
@@ -525,6 +769,10 @@ int main(void)
   /* definition and creation of MotorTask */
   osThreadDef(MotorTask, StartMotorTask, osPriorityIdle, 0, 128);
   MotorTaskHandle = osThreadCreate(osThread(MotorTask), NULL);
+
+  // Nueva Tarea de Control
+  osThreadDef(ControlTask, StartControlTask, osPriorityNormal, 0, 512);
+  ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* USER CODE END RTOS_THREADS */
@@ -827,23 +1075,59 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
    }
 }
 
+/**
+ * @brief Callback de interrupción externa por GPIO (EXTI).
+ *
+ * Esta función es llamada automáticamente por la HAL cuando ocurre
+ * una interrupción externa en un pin configurado como EXTI.
+ *
+ * Maneja dos funcionalidades:
+ *  - Conteo de pulsos del sensor de motor (RPM)
+ *  - Decodificación de un encoder rotativo en cuadratura (A/B)
+ *
+ * @param GPIO_Pin Pin que generó la interrupción.
+ */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+    /* ================= SENSOR DE MOTOR ================= */
+
+    // Si la interrupción proviene del sensor de RPM del motor
     if (GPIO_Pin == MOTOR_SENSOR_PIN) {
+        // Incrementar contador de pulsos (usado luego para cálculo de RPM)
         motor_pulse_count++;
-        return;
+        return; // Salir rápido para minimizar tiempo en ISR
     }
 
+    /* ================= ENCODER ROTATIVO ================= */
+
+    // Si la interrupción proviene de cualquiera de las fases del encoder
     if (GPIO_Pin == ENCODER_A_Pin || GPIO_Pin == ENCODER_B_Pin) {
+
+        // Último estado válido del encoder (AB)
         static uint8_t last_state = 0;
+
+        // Contador interno para acumular transiciones
+        // 4 transiciones = 1 paso mecánico del encoder
         static int8_t counter = 0;
 
+        // Leer estados actuales de las señales A y B
         uint8_t state_A = HAL_GPIO_ReadPin(ENCODER_A_GPIO_Port, ENCODER_A_Pin);
         uint8_t state_B = HAL_GPIO_ReadPin(ENCODER_B_GPIO_Port, ENCODER_B_Pin);
+
+        // Combinar A y B en un estado de 2 bits: [A B]
         uint8_t current_state = (state_A << 1) | state_B;
 
+        // Ignorar si el estado no cambió (rebotes o ruido)
         if (current_state == last_state) return;
 
+        /*
+         * Tabla de transición del encoder en cuadratura.
+         * Index = (last_state << 2) | current_state
+         * Valores:
+         *  +1 -> giro horario
+         *  -1 -> giro antihorario
+         *   0 -> transición inválida o ruido
+         */
         const int8_t transition_table[16] = {
              0, -1,  1,  0,
              1,  0,  0, -1,
@@ -851,269 +1135,46 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
              0,  1, -1,  0,
         };
 
-        int8_t transition = transition_table[(last_state << 2) | current_state];
+        // Obtener la transición correspondiente
+        int8_t transition =
+            transition_table[(last_state << 2) | current_state];
 
+        // Si la transición es válida
         if (transition != 0) {
+
+            // Acumular transición
             counter += transition;
+
+            // 4 transiciones positivas → un paso a la derecha
             if (counter >= 4) {
                 MenuEvent_t event = ENCODER_RIGHT;
+
+                // Enviar evento a la cola del menú
                 osMessagePut(menuQueueHandle, (uint32_t)event, 0);
+
+                // Ajustar contador
                 counter -= 4;
-            } else if (counter <= -4) {
+            }
+            // 4 transiciones negativas → un paso a la izquierda
+            else if (counter <= -4) {
                 MenuEvent_t event = ENCODER_LEFT;
+
+                // Enviar evento a la cola del menú
                 osMessagePut(menuQueueHandle, (uint32_t)event, 0);
+
+                // Ajustar contador
                 counter += 4;
             }
         }
+
+        // Actualizar el último estado del encoder
         last_state = current_state;
     }
 }
 
-/* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartMenuTask */
-/**
-  * @brief  Function implementing the menuTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartMenuTask */
-void StartMenuTask(void const * argument)
-{
-  /* USER CODE BEGIN 5 */
-    update_display();
+//* USER CODE END 4 */
 
-    osEvent event;
-    uint32_t last_draw_time = 0;
-    int needs_update = 0;
-
-    // Variables para "Update on Change" del Dashboard
-    float last_disp_temp = -999.0f;
-    float last_disp_hum = -999.0f;
-    uint16_t last_disp_rpm = 9999;
-    HumidifierState_t last_disp_hum_state = HUM_STATE_IDLE;
-    uint8_t last_disp_day = 255;
-    uint8_t last_disp_is_running = 255;
-
-    for(;;)
-    {
-        // Timeout de 200ms para chequear cambios frecuentemente sin saturar I2C
-        event = osMessageGet(menuQueueHandle, 200);
-
-        if (event.status == osEventMessage) {
-            MenuEvent_t initial_event = (MenuEvent_t)event.value.v;
-
-            if (initial_event == BUTTON_LONG_PRESS) {
-                // Volver atrás / Reset
-                if (current_ui_mode == UI_MODE_TEST_MENU || current_ui_mode == UI_MODE_CONFIG_EDIT) {
-                    current_ui_mode = UI_MODE_MAIN_MENU;
-                } else if (current_ui_mode == UI_MODE_MAIN_MENU) {
-                    current_ui_mode = UI_MODE_DASHBOARD;
-                }
-                needs_update = 1;
-                continue;
-            }
-
-            int8_t net_movement = 0;
-            int button_pressed = 0;
-
-            if (initial_event == ENCODER_RIGHT) net_movement++;
-            else if (initial_event == ENCODER_LEFT) net_movement--;
-            else if (initial_event == BUTTON_PRESS) button_pressed = 1;
-
-            int batch_limit = 20;
-            while (batch_limit-- > 0 && (event = osMessageGet(menuQueueHandle, 0)).status == osEventMessage) {
-                MenuEvent_t batch_evt = (MenuEvent_t)event.value.v;
-                if (batch_evt == ENCODER_RIGHT) net_movement++;
-                else if (batch_evt == ENCODER_LEFT) net_movement--;
-            }
-
-            // --- LÓGICA DE INTERFAZ ---
-
-            if (current_ui_mode == UI_MODE_DASHBOARD) {
-                if (button_pressed) {
-                    current_ui_mode = UI_MODE_MAIN_MENU;
-                    selected_item = 0;
-                    needs_update = 1;
-                }
-            }
-            else if (current_ui_mode == UI_MODE_MAIN_MENU) {
-                // Navegación Menú Principal
-                if (net_movement != 0) {
-                    int16_t new_pos = selected_item + net_movement;
-                    selected_item = ((new_pos % menu_size) + menu_size) % menu_size;
-
-                    if (selected_item >= menu_top_item + LCD_ROWS) menu_top_item = selected_item - (LCD_ROWS - 1);
-                    else if (selected_item < menu_top_item) menu_top_item = selected_item;
-                    needs_update = 1;
-                }
-                if (button_pressed) {
-                    if (selected_item == 1) { // Configuracion
-                        current_ui_mode = UI_MODE_CONFIG_EDIT;
-                        sysData.current_stage_idx = 0; // Default Etapa 1
-                        config_item = 0;
-                        is_editing_val = 0;
-                    } else if (selected_item == 2) { // Test
-                        current_ui_mode = UI_MODE_TEST_MENU;
-                        test_selected_item = 0;
-                    } else { // Ver Sensores (Volver)
-                        current_ui_mode = UI_MODE_DASHBOARD;
-                    }
-                    needs_update = 1;
-                }
-            }
-            else if (current_ui_mode == UI_MODE_TEST_MENU) {
-                // Menú Test
-                if (net_movement != 0) {
-                    int16_t new_pos = test_selected_item + net_movement;
-                    test_selected_item = ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
-                    if (test_selected_item >= test_top_item + LCD_ROWS) test_top_item = test_selected_item - (LCD_ROWS - 1);
-                    else if (test_selected_item < test_top_item) test_top_item = test_selected_item;
-                    needs_update = 1;
-                }
-                if (button_pressed) {
-                    toggle_output(test_selected_item);
-                    needs_update = 1;
-                }
-            }
-            else if (current_ui_mode == UI_MODE_CONFIG_EDIT) {
-                // Editor de Configuración
-                if (button_pressed) {
-                    if (config_item == 4) { // SALIR
-                        Save_Config_To_Flash(); // Guardar cambios
-                        current_ui_mode = UI_MODE_MAIN_MENU;
-                    } else {
-                        is_editing_val = !is_editing_val; // Toggle edición
-                    }
-                    needs_update = 1;
-                }
-
-                if (net_movement != 0) {
-                    if (!is_editing_val) {
-                        config_item += net_movement;
-                        if (config_item < 0) config_item = 4;
-                        if (config_item > 4) config_item = 0;
-                    } else {
-                        // Modificar valores
-                        StageConfig_t *st = &sysData.stages[sysData.current_stage_idx];
-                        switch(config_item) {
-                            case 0: st->end_day += net_movement;
-                                    if(st->end_day < 1) st->end_day = 1;
-                                    break;
-                            case 1: st->temp_target += (net_movement * 0.1f); break;
-                            case 2: st->hum_target += (net_movement * 1.0f); break;
-                            case 3: if(net_movement!=0) st->motor_on = !st->motor_on; break;
-                        }
-                    }
-                    needs_update = 1;
-                }
-            }
-        }
-        else if (event.status == osEventTimeout) {
-            // Chequeo inteligente de cambios
-            if (current_ui_mode == UI_MODE_DASHBOARD) {
-                // Obtenemos valores actuales para comparar
-                uint8_t day = Get_Current_Day();
-
-                // Comparamos con la última vez que dibujamos
-                if (current_temp != last_disp_temp ||
-                    current_hum != last_disp_hum ||
-                    global_rpm != last_disp_rpm ||
-                    hum_state != last_disp_hum_state ||
-                    day != last_disp_day ||
-                    sysData.is_running != last_disp_is_running)
-                {
-                    needs_update = 1;
-                }
-            }
-        }
-
-        uint32_t current_time = HAL_GetTick();
-        if (needs_update && (current_time - last_draw_time >= MIN_DRAW_INTERVAL_MS)) {
-
-            // Actualizamos referencias ANTES de dibujar
-            if (current_ui_mode == UI_MODE_DASHBOARD) {
-                last_disp_temp = current_temp;
-                last_disp_hum = current_hum;
-                last_disp_rpm = global_rpm;
-                last_disp_hum_state = hum_state;
-                last_disp_day = Get_Current_Day();
-                last_disp_is_running = sysData.is_running;
-            }
-
-            update_display();
-            last_draw_time = current_time;
-            needs_update = 0;
-        }
-    }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartDebounceTask */
-/**
-* @brief Function implementing the debounceTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartDebounceTask */
-void StartDebounceTask(void const * argument)
-{
-  /* USER CODE BEGIN StartDebounceTask */
-    uint8_t integrator = 0;
-    uint8_t prev_state = 1;
-    uint32_t hold_counter = 0;
-    uint8_t long_press_sent = 0;
-
-    for(;;)
-    {
-        osDelay(DEBOUNCE_POLL_RATE_MS);
-        uint8_t pin_state = HAL_GPIO_ReadPin(ENCODER_SW_GPIO_Port, ENCODER_SW_Pin);
-
-        if (pin_state == GPIO_PIN_RESET) {
-            if (integrator < DEBOUNCE_THRESHOLD) integrator++;
-        } else {
-            if (integrator > 0) integrator--;
-        }
-
-        if (integrator >= DEBOUNCE_THRESHOLD && prev_state == 1) {
-            prev_state = 0;
-            hold_counter = 0;
-            long_press_sent = 0;
-            MenuEvent_t event = BUTTON_PRESS;
-            osMessagePut(menuQueueHandle, (uint32_t)event, 0);
-        }
-        else if (prev_state == 0 && integrator >= DEBOUNCE_THRESHOLD) {
-            hold_counter++;
-            if (hold_counter >= LONG_PRESS_TICKS && long_press_sent == 0) {
-                long_press_sent = 1;
-                MenuEvent_t event = BUTTON_LONG_PRESS;
-                osMessagePut(menuQueueHandle, (uint32_t)event, 0);
-            }
-        }
-        else if (integrator == 0 && prev_state == 0) {
-            prev_state = 1;
-        }
-    }
-  /* USER CODE END StartDebounceTask */
-}
-
-/* USER CODE BEGIN Header_StartMotorTask */
-/**
-* @brief Function implementing the MotorTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartMotorTask */
-void StartMotorTask(void const * argument)
-{
-  /* USER CODE BEGIN StartMotorTask */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartMotorTask */
-}
 
  /**
   * @brief  Period elapsed callback in non blocking mode
