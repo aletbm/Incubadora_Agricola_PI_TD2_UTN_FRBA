@@ -64,7 +64,6 @@ TaskHandle_t controlTaskHandle;
 TaskHandle_t sensorTaskHandle;
 
 QueueHandle_t menuQueueHandle;
-SemaphoreHandle_t xLcdMutex;
 SemaphoreHandle_t xDHTMutex;
 
 // --- VARIABLES DE SISTEMA ---
@@ -110,10 +109,7 @@ void StartDefaultTask(void const * argument);
 void StartMenuTask(void *argument)
 {
     if (is_welcome) {
-    	if (xSemaphoreTake(xLcdMutex, pdMS_TO_TICKS(100))) {
-    	        LCD_ShowWelcome("TDII: INCUBADORA");
-    	        xSemaphoreGive(xLcdMutex);
-    	    }
+    	LCD_ShowWelcome("TDII: INCUBADORA");
 
         /* Mantener visible */
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -465,7 +461,7 @@ void StartDebounceTask(void *argument)
 
             /* Enviar evento de pulsación corta */
             MenuEvent_t event = BUTTON_PRESS;
-            xQueueSend(menuQueueHandle, &event, 0);
+            xQueueSend(menuQueueHandle, &event, pdMS_TO_TICKS(10));
         }
 
         /* ---- Botón mantenido presionado ---- */
@@ -480,7 +476,7 @@ void StartDebounceTask(void *argument)
                 long_press_sent = 1;
 
                 MenuEvent_t event = BUTTON_LONG_PRESS;
-                xQueueSend(menuQueueHandle, &event, 0);
+                xQueueSend(menuQueueHandle, &event, pdMS_TO_TICKS(10));
             }
         }
 
@@ -767,7 +763,6 @@ int main(void)
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
-  xLcdMutex = xSemaphoreCreateMutex();
   xDHTMutex = xSemaphoreCreateMutex();
   /* USER CODE END RTOS_MUTEX */
 
@@ -787,7 +782,7 @@ int main(void)
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  xTaskCreate(StartMenuTask, "Menu", 1024, NULL, osPriorityAboveNormal, &menuTaskHandle);
+  xTaskCreate(StartMenuTask, "Menu", 1024, NULL, osPriorityRealtime, &menuTaskHandle);
   xTaskCreate(StartDebounceTask, "Debounce", 128, NULL, osPriorityNormal, &debounceTaskHandle);
   //xTaskCreate(StartMotorTask, "Motor", 128, NULL, osPriorityNormal, &motorTaskHandle);
   xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);

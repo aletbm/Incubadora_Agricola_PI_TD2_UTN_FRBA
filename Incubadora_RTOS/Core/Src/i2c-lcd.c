@@ -99,13 +99,13 @@ void Write4Bits(uint8_t value)
 void ExpanderWrite(uint8_t _data)
 {
   uint8_t data = _data | dpBacklight;
-  HAL_I2C_Master_Transmit(&hi2c1, DEVICE_ADDR, (uint8_t*)&data, 1, 10);
+  HAL_I2C_Master_Transmit(&hi2c1, DEVICE_ADDR, &data, 1, 100);
 }
 
 void PulseEnable(uint8_t _data)
 {
   ExpanderWrite(_data | ENABLE);
-  DelayUS(50);
+  DelayUS(1);
 
   ExpanderWrite(_data & ~ENABLE);
   DelayUS(50);
@@ -465,7 +465,6 @@ void render_dashboard(void)
 void render_menu(void)
 {
     char buffer[17];   // Buffer de línea
-
     for (int i = 0; i < LCD_ROWS; i++) {
         int item_index = menu_top_item + i;
 
@@ -489,7 +488,7 @@ void render_menu(void)
             }
         } else {
             // Línea vacía con 16 espacios para limpiar residuos
-            snprintf(buffer, sizeof(buffer), "%-16s", " ");
+            snprintf(buffer, sizeof(buffer), "%-16.16s", " ");
         }
         HD44780_SetCursor(0, i);
         HD44780_PrintStr(buffer);
@@ -731,13 +730,9 @@ void render_config_time(void) {
 }
 
 void clear_LCD(void) {
-    for (int row = 0; row < LCD_ROWS; row++) {   // Recorre todas las filas
-        HD44780_SetCursor(0, row);               // Posiciona al inicio de la fila
-        for (int col = 0; col < 16; col++) {     // Escribe 16 espacios en la fila
-            SendChar(' ');
-        }
-    }
-    HD44780_SetCursor(0, 0);                     // Vuelve al inicio de la pantalla
+	SendCommand(LCD_CLEARDISPLAY);       // Clear display
+	DelayUS(2000);
+    HD44780_SetCursor(0, 0); // Vuelve al inicio de la pantalla
 }
 
 
@@ -751,22 +746,16 @@ void clear_LCD(void) {
  */
 void update_display(void)
 {
-	if(old_ui_mode != current_ui_mode){
-		clear_LCD();
-		old_ui_mode = current_ui_mode;
-	}
-
-    // Proteger el acceso al LCD frente a ISR o tareas concurrentes
-	if (xSemaphoreTake(xLcdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-		if      (current_ui_mode == UI_MODE_DASHBOARD)      render_dashboard();
-		else if (current_ui_mode == UI_MODE_MAIN_MENU)      render_menu();
-		else if (current_ui_mode == UI_MODE_TEST_MENU)      render_test_menu();
-		else if (current_ui_mode == UI_MODE_CONFIG_SELECT)  render_config_select();
-		else if (current_ui_mode == UI_MODE_CONFIG_EDIT)    render_config_edit();
-		else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL)  render_config_global();
-		else if (current_ui_mode == UI_MODE_CONFIG_TIME)    render_config_time();
-		xSemaphoreGive(xLcdMutex);
-	}
+	// Proteger el acceso al LCD frente a ISR o tareas concurrentes
+	taskENTER_CRITICAL();
+	if      (current_ui_mode == UI_MODE_DASHBOARD)      render_dashboard();
+	else if (current_ui_mode == UI_MODE_MAIN_MENU)      render_menu();
+	else if (current_ui_mode == UI_MODE_TEST_MENU)      render_test_menu();
+	else if (current_ui_mode == UI_MODE_CONFIG_SELECT)  render_config_select();
+	else if (current_ui_mode == UI_MODE_CONFIG_EDIT)    render_config_edit();
+	else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL)  render_config_global();
+	else if (current_ui_mode == UI_MODE_CONFIG_TIME)    render_config_time();
+	taskEXIT_CRITICAL();
 }
 
 
