@@ -55,21 +55,60 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
-void StartMenuTask(void const * argument);
-void StartDebounceTask(void const * argument);
-void StartMotorTask(void const * argument);
-void StartControlTask(void const * argument);
-
+void StartMenuTask(void * argument);
+void StartDebounceTask(void * argument);
+void StartMotorTask(void * argument);
+void StartControlTask(void * argument);
+void StartControlTask(void * argument);
+void StartSensorTask(void * argument);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-
+#define B1_Pin GPIO_PIN_13
+#define B1_GPIO_Port GPIOC
+#define ENCODER_A_Pin GPIO_PIN_0
+#define ENCODER_A_GPIO_Port GPIOC
+#define ENCODER_B_Pin GPIO_PIN_1
+#define ENCODER_B_GPIO_Port GPIOC
+#define ENCODER_B_EXTI_IRQn EXTI1_IRQn
+#define USART_TX_Pin GPIO_PIN_2
+#define USART_TX_GPIO_Port GPIOA
+#define USART_RX_Pin GPIO_PIN_3
+#define USART_RX_GPIO_Port GPIOA
+#define LD2_Pin GPIO_PIN_5
+#define LD2_GPIO_Port GPIOA
+#define ENCODER_SW_Pin GPIO_PIN_0
+#define ENCODER_SW_GPIO_Port GPIOB
+#define LAMPARA_Pin GPIO_PIN_10
+#define LAMPARA_GPIO_Port GPIOB
+#define BUZZER_Pin GPIO_PIN_12
+#define BUZZER_GPIO_Port GPIOB
+#define HUMIDIFICADOR_Pin GPIO_PIN_8
+#define HUMIDIFICADOR_GPIO_Port GPIOA
+#define COOLER_Pin GPIO_PIN_9
+#define COOLER_GPIO_Port GPIOA
+#define DHT11_Pin GPIO_PIN_11
+#define DHT11_GPIO_Port GPIOA
+#define TMS_Pin GPIO_PIN_13
+#define TMS_GPIO_Port GPIOA
+#define TCK_Pin GPIO_PIN_14
+#define TCK_GPIO_Port GPIOA
+#define SWO_Pin GPIO_PIN_3
+#define SWO_GPIO_Port GPIOB
+#define MOTOR_Pin GPIO_PIN_4
+#define MOTOR_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
+typedef enum {
+    HUM_STATE_IDLE,      // Esperando
+    HUM_STATE_DOSING,    // Inyectando humedad
+    HUM_STATE_COOLDOWN   // Esperando estabilización
+} HumidifierState_t;
 
-extern TIM_HandleTypeDef htim1;
+extern UART_HandleTypeDef huart2;
+extern TIM_HandleTypeDef htim12;
 extern float last_valid_temp;
 extern float last_valid_hum;
-
+extern HumidifierState_t hum_state;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

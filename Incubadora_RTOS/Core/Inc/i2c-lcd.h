@@ -1,8 +1,6 @@
 #ifndef LIQUIDCRYSTAL_I2C_H_
 #define LIQUIDCRYSTAL_I2C_H_
 
-#include "stm32f4xx_hal.h"
-
 /* Command */
 #define LCD_CLEARDISPLAY 0x01
 #define LCD_RETURNHOME 0x02
@@ -61,14 +59,14 @@
 #define LCD_COMMAND_DELAY       5
 #define MIN_DRAW_INTERVAL_MS    50
 
-static void SendCommand(uint8_t);
-static void SendChar(uint8_t);
-static void Send(uint8_t, uint8_t);
-static void Write4Bits(uint8_t);
-static void ExpanderWrite(uint8_t);
-static void PulseEnable(uint8_t);
-static void DelayInit(void);
-static void DelayUS(uint32_t);
+void SendCommand(uint8_t);
+void SendChar(uint8_t);
+void Send(uint8_t, uint8_t);
+void Write4Bits(uint8_t);
+void ExpanderWrite(uint8_t);
+void PulseEnable(uint8_t);
+void DelayInit(void);
+void DelayUS(uint32_t);
 
 void HD44780_Init(uint8_t rows);
 void HD44780_Clear();
@@ -101,7 +99,8 @@ void HD44780_PrintStr(const char[]);
 void I2C_Scan(void);
 void Enable_Internal_Pullups(void);
 
-void LCD_ShowWelcome(uint8_t rows, const char *msg, uint32_t delay_ms)
+void LCD_ForceReset(void);
+void LCD_ShowWelcome(const char *msg);
 void I2C_Scan(void);
 void Enable_Internal_Pullups(void);
 void recover_lcd(void);
@@ -140,5 +139,8 @@ extern int8_t is_editing_val;
 extern const int8_t test_menu_size;
 extern int8_t test_selected_item;
 extern int8_t test_top_item;
+extern const int8_t menu_size;
+extern int8_t menu_top_item;
+extern int8_t selected_item;
 
 #endif /* LIQUIDCRYSTAL_I2C_H_ */

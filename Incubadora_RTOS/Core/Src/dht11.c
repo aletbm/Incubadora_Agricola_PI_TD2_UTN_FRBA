@@ -4,25 +4,34 @@
  *  Created on: Aug 28, 2025
  *      Author: Magdalena
  */
+
+#include "main.h"
 #include <string.h>
 #include <stdio.h>
-#include "main.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+
 #include "dht11.h"
 #include "config.h"
+#include "utils.h"
+
+extern SemaphoreHandle_t xDHTMutex;
 
 /*Funcion para iniciar el timer*/
 void start_timer(void){
-	HAL_TIM_Base_Start(&htim1);
+	HAL_TIM_Base_Start(&htim12);
 }
 
 /*Funcion para resetar el timer*/
 void reset_timer(void){
-	__HAL_TIM_SET_COUNTER(&htim1,0);  // set the counter value a 0
+	__HAL_TIM_SET_COUNTER(&htim12,0);  // set the counter value a 0
 }
 
 /*Retorna el valor actual del timer 1*/
 uint32_t read_timer(void){
-	return __HAL_TIM_GET_COUNTER(&htim1);	//el tim no para en el debug. Acá lo leo. En 2^16 se recarga solo
+	return __HAL_TIM_GET_COUNTER(&htim12);	//el tim no para en el debug. Acá lo leo. En 2^16 se recarga solo
 }
 
 
@@ -124,8 +133,11 @@ void DHT11_GetDatos(void){
 	}
 
 	if (dht11_data[4] == (dht11_data[0] + dht11_data[1] + dht11_data[2] + dht11_data[3])) {		//verifico chksum
-		last_valid_hum = dht11_data[0] + (dht11_data[1]) * 0.1;
-		last_valid_temp = dht11_data[2] + (dht11_data[3] & 0x0f) * 0.1;
+		if (xSemaphoreTake(xDHTMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+			liveStatus.hum_current = dht11_data[0] + (dht11_data[1] & 0x0f) * 0.1;
+			liveStatus.temp_current = dht11_data[2] + (dht11_data[3] & 0x0f) * 0.1;
+			xSemaphoreGive(xDHTMutex);
+		}
 		return;
 	}
 	else

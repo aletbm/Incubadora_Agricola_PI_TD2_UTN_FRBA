@@ -7,6 +7,9 @@
 
 #include "eeprom.h"
 #include <string.h> // Necesario para memcpy
+#include <stdio.h>
+#include "stm32f4xx_hal.h"
+#include "utils.h"
 
 // --- GESTIÓN DE MEMORIA FLASH (PERSISTENCIA) ---
 
@@ -114,8 +117,7 @@ void Save_Config_To_Flash(void)
 
     /* Actualización del tiempo acumulado antes de guardar */
     if (sysData.is_running) {
-        uint32_t current_session_min =
-            (HAL_GetTick() - sysData.last_boot_tick) / 60000U;
+        uint32_t current_session_min = (HAL_GetTick() - sysData.last_boot_tick) / 60000U;
 
         sysData.saved_timestamp += current_session_min;
         sysData.last_boot_tick = HAL_GetTick();

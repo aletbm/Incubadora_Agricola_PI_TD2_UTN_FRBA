@@ -8,18 +8,15 @@
 #ifndef INC_UTILS_H_
 #define INC_UTILS_H_
 
+#include <stdint.h>
+#include "stm32f446xx.h"
+
 typedef struct {
     char* name;          // Nombre a mostrar
     uint8_t state;       // 0 = OFF, 1 = ON (Lógico)
     GPIO_TypeDef* port;  // Puerto GPIO
     uint16_t pin;        // Pin GPIO
 } OutputControl_t;
-
-typedef enum {
-    HUM_STATE_IDLE,      // Esperando
-    HUM_STATE_DOSING,    // Inyectando humedad
-    HUM_STATE_COOLDOWN   // Esperando estabilización
-} HumidifierState_t;
 
 typedef struct {
     char name[12];      // "DESARROLLO"
@@ -61,8 +58,8 @@ uint8_t Get_Current_Minute(void);
 void Get_Active_Targets(float *temp, float *hum, uint8_t *motor_on);
 
 extern IncubatorData_t sysData;
-extern OutputControl_t test_outputs;
-extern LiveStatus_t liveStatus;
+extern OutputControl_t test_outputs[];
+extern volatile LiveStatus_t liveStatus;
 extern int16_t edit_day;
 extern int16_t edit_hour;
 extern int16_t edit_min;

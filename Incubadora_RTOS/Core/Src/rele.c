@@ -13,7 +13,7 @@ void RELES_Init(void)
  */
 void RELES_EncenderTodos(void)
 {
-	HAL_GPIO_WritePin(HUMIFICADOR_GPIO_Port, HUMIDIFICADOR_Pin, RELE_ACTIVO);
+	HAL_GPIO_WritePin(HUMIDIFICADOR_GPIO_Port, HUMIDIFICADOR_Pin, RELE_ACTIVO);
 	HAL_GPIO_WritePin(MOTOR_GPIO_Port, MOTOR_Pin, RELE_ACTIVO);
 	HAL_GPIO_WritePin(LAMPARA_GPIO_Port, LAMPARA_Pin, RELE_ACTIVO);
 	HAL_GPIO_WritePin(COOLER_GPIO_Port, COOLER_Pin, RELE_ACTIVO);
@@ -37,12 +37,11 @@ void RELES_ToggleTodos(void)
 void encender_buzzer(void)
 {
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, RELE_ACTIVO);
-    buzzer_estado = 1;
 }
+
 void apagar_buzzer(void)
 {
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, RELE_INACTIVO);
-    buzzer_estado = 0;
 }
 
 uint8_t estado_buzzer(void){
@@ -72,7 +71,7 @@ void apagar_lampara(void)
     HAL_GPIO_WritePin(LAMPARA_GPIO_Port, LAMPARA_Pin, RELE_INACTIVO);
 }
 uint8_t estado_lampara(void){
-	HAL_GPIO_ReadPin(LAMPARA_GPIO_Port, LAMPARA_Pin);
+	return HAL_GPIO_ReadPin(LAMPARA_GPIO_Port, LAMPARA_Pin);
 }
 
 // COOLER

@@ -30,4 +30,8 @@ void encender_cooler(void);
 void apagar_cooler(void);
 uint8_t estado_cooler(void);
 
+void encender_motor(void);
+void apagar_motor(void);
+uint8_t estado_motor(void);
+
 #endif

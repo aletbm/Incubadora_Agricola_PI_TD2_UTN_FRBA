@@ -29,28 +29,30 @@ static char msg_hum[128];
  * Usadas por control_parametros()
  */
 void reset_alarma_temp(uint32_t temperatura){
+	int len = 0;
 	apagar_buzzer();
 	estado_alarma_temp = 0;
 	// Si se habia entrado en alarma se envia un mensaje avisando que se soluciono
 	if(estado_alarma_temp == 1)
-		int len = snprintf(msg_temp, sizeof(msg_temp), "Temperatura se autoregulo: %02lu °C\r\n", temperatura);
+		len = snprintf(msg_temp, sizeof(msg_temp), "Temperatura se autoregulo: %02lu °C\r\n", temperatura);
 	else if(estado_alarma_temp == 2)
-		int len = snprintf(msg_temp, sizeof(msg_temp), "ATENCION: Temperatura se autoregulo: %02lu °C, se recomienda investigar posible falla\r\n", temperatura);
-
-	HAL_UART_Transmit(&huart1, (uint8_t*)msg_temp, len, 1000);
+		len = snprintf(msg_temp, sizeof(msg_temp), "ATENCION: Temperatura se autoregulo: %02lu °C, se recomienda investigar posible falla\r\n", temperatura);
+	if(len > 0)
+		HAL_UART_Transmit(&huart1, (uint8_t*)msg_temp, len, 1000);
 	alarma_temp_countdown = HAL_GetTick();
 }
 
 void reset_alarma_humedad(uint32_t humedad){
+	int len = 0;
 	apagar_buzzer();
 	estado_alarma_humedad = 0;
 	// Si se habia entrado en alarma se envia un mensaje avisando que se soluciono
 	if(estado_alarma_humedad == 1)
-		int len = snprintf(msg_hum, sizeof(msg_hum), "Humedad se autoregulo: %02lu \r\n", humedad);
+		len = snprintf(msg_hum, sizeof(msg_hum), "Humedad se autoregulo: %02lu \r\n", humedad);
 	else if(estado_alarma_humedad == 2)
-		int len = snprintf(msg_hum, sizeof(msg_hum), "ATENCION: Humedad se autoregulo: %02lu , se recomienda investigar posible falla\r\n", humedad);
-
-	HAL_UART_Transmit(&huart1, (uint8_t*)msg_hum, len, 1000);
+		len = snprintf(msg_hum, sizeof(msg_hum), "ATENCION: Humedad se autoregulo: %02lu , se recomienda investigar posible falla\r\n", humedad);
+	if(len > 0)
+		HAL_UART_Transmit(&huart1, (uint8_t*)msg_hum, len, 1000);
 	alarma_humedad_countdown = HAL_GetTick();
 }
 
@@ -96,10 +98,10 @@ void control_alarma(uint32_t temperatura, uint32_t humedad){
 void control_parametros(uint32_t temperatura, uint32_t humedad)
 {
 	if(estado_alarma_temp == -1)
-		reset_alarma_temp();
+		reset_alarma_temp(temperatura);
 
 	if(estado_alarma_humedad == -1)
-		reset_alarma_humedad();
+		reset_alarma_humedad(humedad);
 
     // Control de temperatura
     if (temperatura > TEMP_ETAPA1_MAX_TOLERABLE){ //mucho calor

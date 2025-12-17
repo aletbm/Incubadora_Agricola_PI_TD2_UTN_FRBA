@@ -7,6 +7,7 @@
 
 #include "utils.h"
 #include "config.h"
+#include "i2c-lcd.h"
 
 IncubatorData_t sysData;
 

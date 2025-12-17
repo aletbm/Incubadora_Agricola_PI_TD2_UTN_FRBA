@@ -1,7 +1,21 @@
+#include "main.h"
+#include "cmsis_os.h"
+#include <stdint.h>    // Agregado para seguridad con tipos
+#include <string.h>
+#include <stdio.h>
+
+/* --- AGREGAR ESTO EN ESTE ORDEN EXACTO --- */
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+/* ----------------------------------------- */
+
 #include "i2c-lcd.h"
 #include "utils.h"
 
 extern I2C_HandleTypeDef hi2c1;
+extern SemaphoreHandle_t xLcdMutex;
+
 
 uint8_t dpFunction;
 uint8_t dpControl;
@@ -21,7 +35,7 @@ uint8_t special1[8] = {
 };
 
 uint8_t special2[8] = {
-        0b11000,
+		0b11000,
         0b11000,
         0b00110,
         0b01001,
@@ -54,56 +68,108 @@ int8_t config_item = 0;
 int8_t is_editing_val = 0;
 
 // --- VARIABLES DE SISTEMA ---
+UIMode_t old_ui_mode = UI_MODE_DASHBOARD;
 UIMode_t current_ui_mode = UI_MODE_DASHBOARD;
+
+
+void SendCommand(uint8_t cmd)
+{
+  Send(cmd, 0);
+}
+
+void SendChar(uint8_t ch)
+{
+  Send(ch, RS);
+}
+
+void Send(uint8_t value, uint8_t mode)
+{
+  uint8_t highnib = value & 0xF0;
+  uint8_t lownib = (value<<4) & 0xF0;
+  Write4Bits((highnib)|mode);
+  Write4Bits((lownib)|mode);
+}
+
+void Write4Bits(uint8_t value)
+{
+  ExpanderWrite(value);
+  PulseEnable(value);
+}
+
+void ExpanderWrite(uint8_t _data)
+{
+  uint8_t data = _data | dpBacklight;
+  HAL_I2C_Master_Transmit(&hi2c1, DEVICE_ADDR, (uint8_t*)&data, 1, 10);
+}
+
+void PulseEnable(uint8_t _data)
+{
+  ExpanderWrite(_data | ENABLE);
+  DelayUS(50);
+
+  ExpanderWrite(_data & ~ENABLE);
+  DelayUS(50);
+}
+
+void DelayInit(void)
+{
+  CoreDebug->DEMCR &= ~CoreDebug_DEMCR_TRCENA_Msk;
+  CoreDebug->DEMCR |=  CoreDebug_DEMCR_TRCENA_Msk;
+
+  DWT->CTRL &= ~DWT_CTRL_CYCCNTENA_Msk; //~0x00000001;
+  DWT->CTRL |=  DWT_CTRL_CYCCNTENA_Msk; //0x00000001;
+
+  DWT->CYCCNT = 0;
+
+  /* 3 NO OPERATION instructions */
+  __ASM volatile ("NOP");
+  __ASM volatile ("NOP");
+  __ASM volatile ("NOP");
+}
+
+void DelayUS(uint32_t us) {
+  uint32_t cycles = (SystemCoreClock/1000000L)*us;
+  uint32_t start = DWT->CYCCNT;
+  volatile uint32_t cnt;
+
+  do
+  {
+    cnt = DWT->CYCCNT - start;
+  } while(cnt < cycles);
+}
 
 void HD44780_Init(uint8_t rows)
 {
   dpRows = rows;
-
   dpBacklight = LCD_BACKLIGHT;
 
+  // Configuración inicial: 4 bits, 1 línea, fuentes 5x8
   dpFunction = LCD_4BITMODE | LCD_1LINE | LCD_5x8DOTS;
 
-  if (dpRows > 1)
-  {
+  if (dpRows > 1) {
     dpFunction |= LCD_2LINE;
   }
-  else
-  {
-    dpFunction |= LCD_5x10DOTS;
-  }
 
-  /* Wait for initialization */
+  /* 1. Espera inicial larga */
+  // Es vital dar tiempo al LCD para que su voltaje interno se estabilice
   DelayInit();
-  HAL_Delay(50);
+  HAL_Delay(100); // Aumentado a 100ms
+  LCD_ForceReset();
+  /* 2. Sincronización de interfaz (Software Reset) */
+  // Este paso es el que evita los "caracteres extraños".
+  // Forzamos al LCD a modo 8 bits 3 veces para que se resetee internamente.
 
-  ExpanderWrite(dpBacklight);
-  HAL_Delay(1000);
-
-  /* 4bit Mode */
-  Write4Bits(0x03 << 4);
-  DelayUS(4500);
-
-  Write4Bits(0x03 << 4);
-  DelayUS(4500);
-
-  Write4Bits(0x03 << 4);
-  DelayUS(4500);
-
-  Write4Bits(0x02 << 4);
-  DelayUS(100);
-
-  /* Display Control */
   SendCommand(LCD_FUNCTIONSET | dpFunction);
 
   dpControl = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
   HD44780_Display();
+
   HD44780_Clear();
 
-  /* Display Mode */
   dpMode = LCD_ENTRYLEFT | LCD_ENTRYSHIFTDECREMENT;
   SendCommand(LCD_ENTRYMODESET | dpMode);
-  DelayUS(4500);
+
+  HAL_Delay(5);
 
   HD44780_CreateSpecialChar(0, special1);
   HD44780_CreateSpecialChar(1, special2);
@@ -225,7 +291,9 @@ void HD44780_LoadCustomCharacter(uint8_t char_num, uint8_t *rows)
 
 void HD44780_PrintStr(const char c[])
 {
-  while(*c) SendChar(*c++);
+  while(*c){
+	  SendChar(*c++);
+  }
 }
 
 void HD44780_SetBacklight(uint8_t new_val)
@@ -237,79 +305,13 @@ void HD44780_SetBacklight(uint8_t new_val)
 void HD44780_NoBacklight(void)
 {
   dpBacklight=LCD_NOBACKLIGHT;
-  ExpanderWrite(0);
+  ExpanderWrite(dpBacklight);
 }
 
 void HD44780_Backlight(void)
 {
   dpBacklight=LCD_BACKLIGHT;
-  ExpanderWrite(0);
-}
-
-static void SendCommand(uint8_t cmd)
-{
-  Send(cmd, 0);
-}
-
-static void SendChar(uint8_t ch)
-{
-  Send(ch, RS);
-}
-
-static void Send(uint8_t value, uint8_t mode)
-{
-  uint8_t highnib = value & 0xF0;
-  uint8_t lownib = (value<<4) & 0xF0;
-  Write4Bits((highnib)|mode);
-  Write4Bits((lownib)|mode);
-}
-
-static void Write4Bits(uint8_t value)
-{
-  ExpanderWrite(value);
-  PulseEnable(value);
-}
-
-static void ExpanderWrite(uint8_t _data)
-{
-  uint8_t data = _data | dpBacklight;
-  HAL_I2C_Master_Transmit(&hi2c1, DEVICE_ADDR, (uint8_t*)&data, 1, 10);
-}
-
-static void PulseEnable(uint8_t _data)
-{
-  ExpanderWrite(_data | ENABLE);
-  DelayUS(20);
-
-  ExpanderWrite(_data & ~ENABLE);
-  DelayUS(20);
-}
-
-static void DelayInit(void)
-{
-  CoreDebug->DEMCR &= ~CoreDebug_DEMCR_TRCENA_Msk;
-  CoreDebug->DEMCR |=  CoreDebug_DEMCR_TRCENA_Msk;
-
-  DWT->CTRL &= ~DWT_CTRL_CYCCNTENA_Msk; //~0x00000001;
-  DWT->CTRL |=  DWT_CTRL_CYCCNTENA_Msk; //0x00000001;
-
-  DWT->CYCCNT = 0;
-
-  /* 3 NO OPERATION instructions */
-  __ASM volatile ("NOP");
-  __ASM volatile ("NOP");
-  __ASM volatile ("NOP");
-}
-
-static void DelayUS(uint32_t us) {
-  uint32_t cycles = (SystemCoreClock/1000000L)*us;
-  uint32_t start = DWT->CYCCNT;
-  volatile uint32_t cnt;
-
-  do
-  {
-    cnt = DWT->CYCCNT - start;
-  } while(cnt < cycles);
+  ExpanderWrite(dpBacklight);
 }
 
 /**
@@ -346,6 +348,26 @@ void Enable_Internal_Pullups(void)
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
+void LCD_ForceReset(void)
+{
+    /* Apagar backlight (opcional pero recomendable) */
+    ExpanderWrite(0x00);
+    HAL_Delay(20);
+
+    /* Según datasheet HD44780:
+       Forzar modo 8 bits 3 veces */
+    for (int i = 0; i < 3; i++) {
+        ExpanderWrite(0x30);      // 0b0011xxxx → 8-bit mode
+        PulseEnable(0x30);
+        HAL_Delay(5);
+    }
+
+    /* Pasar a modo 4 bits */
+    ExpanderWrite(0x20);          // 0b0010xxxx → 4-bit mode
+    PulseEnable(0x20);
+    HAL_Delay(5);
+}
+
 /**
  * @brief Inicializa el LCD y muestra un mensaje de bienvenida
  *
@@ -356,22 +378,18 @@ void Enable_Internal_Pullups(void)
  * @param msg  Mensaje a mostrar en la primera línea
  * @param delay_ms Tiempo en milisegundos que el mensaje permanece visible
  */
-void LCD_ShowWelcome(uint8_t rows, const char *msg, uint32_t delay_ms)
+void LCD_ShowWelcome(const char *msg)
 {
-    /* Inicialización del LCD */
-    HD44780_Init(rows);
+    char buffer[17];
+    /* Limpiar SOLO una vez */
     HD44780_Clear();
+
+    /* Preparar mensaje padded */
+    snprintf(buffer, sizeof(buffer), "%-16.16s", msg);
 
     /* Mostrar mensaje */
     HD44780_SetCursor(0, 0);
-    HD44780_PrintStr(msg);
-
-    /* Mantener mensaje visible */
-    HAL_Delay(delay_ms);
-
-    /* Limpiar la línea */
-    HD44780_SetCursor(0, 0);
-    HD44780_PrintStr("                ");
+    HD44780_PrintStr(buffer);
 }
 
 /**
@@ -388,7 +406,8 @@ void LCD_ShowWelcome(uint8_t rows, const char *msg, uint32_t delay_ms)
  */
 void render_dashboard(void)
 {
-    char buffer[20];                     // Buffer para línea LCD
+    char buffer[17];                     // Buffer para línea LCDA
+    char tmp[17];
     float target_t = 0;                  // Temperatura objetivo
     float target_h = 0;                  // Humedad objetivo (no mostrada aquí)
     uint8_t mon = 0;                     // Estado del motor (no usado en dashboard)
@@ -396,19 +415,17 @@ void render_dashboard(void)
     // Si el ciclo está activo, mostrar temperatura actual / objetivo
     if (sysData.is_running) {
         Get_Active_Targets(&target_t, &target_h, &mon);
+
         // Formato: T:37.7/37.7
-        snprintf(buffer, sizeof(buffer),
-                 "T:%04.1f/%04.1f    ",
-                 liveStatus.temp_current, target_t);
+        snprintf(tmp, sizeof(tmp),"T:%04.1f/%04.1f", liveStatus.temp_current, target_t);
     }
     // Si está en pausa, mostrar solo temperatura actual
     else {
-        snprintf(buffer, sizeof(buffer),
-                 "T:%04.1f (PAUSA) ",
-                 liveStatus.temp_current);
+    	snprintf(tmp, sizeof(tmp),"T:%04.1f (PAUSA)", liveStatus.temp_current);
     }
 
     // Escribir línea superior del LCD
+	snprintf(buffer, sizeof(buffer), "%-16.16s", tmp);
     HD44780_SetCursor(0, 0);
     HD44780_PrintStr(buffer);
 
@@ -419,7 +436,7 @@ void render_dashboard(void)
 
     // Línea inferior del LCD
     if (sysData.is_running) {
-        snprintf(buffer, sizeof(buffer),
+        snprintf(tmp, sizeof(tmp),
                  "H:%02.0f%%%c D:%02d H:%02d",
                  liveStatus.hum_current,
                  hum_char,
@@ -427,11 +444,13 @@ void render_dashboard(void)
                  liveStatus.hour_current);
     }
     else {
-        snprintf(buffer, sizeof(buffer),
+        snprintf(tmp, sizeof(tmp),
                  "H:%02.0f%% STANDBY ",
                  liveStatus.hum_current);
     }
 
+
+	snprintf(buffer, sizeof(buffer), "%-16.16s", tmp);
     HD44780_SetCursor(0, 1);
     HD44780_PrintStr(buffer);
 }
@@ -445,7 +464,7 @@ void render_dashboard(void)
  */
 void render_menu(void)
 {
-    char line_buffer[32];   // Buffer de línea
+    char buffer[17];   // Buffer de línea
 
     for (int i = 0; i < LCD_ROWS; i++) {
         int item_index = menu_top_item + i;
@@ -455,27 +474,25 @@ void render_menu(void)
             char cursor = (item_index == selected_item) ? '>' : ' ';
 
             // Texto dinámico para iniciar/pausar ciclo
-            if (current_ui_mode == UI_MODE_MAIN_MENU && item_index == 1) {
-                snprintf(line_buffer, sizeof(line_buffer),
+            if (item_index == 1) {
+                snprintf(buffer, sizeof(buffer),
                          "%c%-15.15s",
                          cursor,
                          sysData.is_running ? "PAUSAR CICLO" : "INICIAR CICLO");
             }
             // Texto normal del menú
             else {
-                snprintf(line_buffer, sizeof(line_buffer),
+                snprintf(buffer, sizeof(buffer),
                          "%c%-15.15s",
                          cursor,
                          menu_items[item_index]);
             }
+        } else {
+            // Línea vacía con 16 espacios para limpiar residuos
+            snprintf(buffer, sizeof(buffer), "%-16s", " ");
         }
-        // Línea vacía si no hay ítems
-        else {
-            snprintf(line_buffer, sizeof(line_buffer), "%-16s", " ");
-        }
-
         HD44780_SetCursor(0, i);
-        HD44780_PrintStr(line_buffer);
+        HD44780_PrintStr(buffer);
     }
 }
 
@@ -541,6 +558,188 @@ void render_config_select(void)
     }
 }
 
+/**
+ * @brief  Renderiza la pantalla de configuración de parámetros generales del sistema.
+ * * Esta interfaz permite gestionar valores globales que no dependen de una etapa específica,
+ * como la duración total del proceso de incubación. Maneja visualmente la navegación
+ * entre los ítems y el estado de edición de los mismos.
+ * * @note   Utiliza 'sysData.total_days' para la persistencia del valor y 'config_item'
+ * para determinar el foco del cursor.
+ * * @retval None
+ */
+void render_config_global(void) {
+    char line1[20];      // Buffer para la línea de encabezado
+    char line2[20];      // Buffer para la línea de parámetros/acción
+    char temp_buff[20];  // Buffer temporal para construcción de strings
+
+    // --- LÍNEA 1: Encabezado Estático ---
+    // Se utiliza relleno manual de espacios para asegurar que se limpie el residuo
+    // de pantallas anteriores en el controlador del LCD.
+    snprintf(line1, sizeof(line1), "CFG: GENERAL    ");
+
+    // --- LÍNEA 2: Lógica de Visualización de Parámetros ---
+    // Dependiendo de config_item, se muestra el parámetro ajustable o la acción de guardado
+    if (config_item == 0) {
+        /* Caso 0: Ajuste de la duración total del ciclo */
+        if(is_editing_val) {
+            // Estado: El usuario está modificando el número de días
+            snprintf(temp_buff, sizeof(temp_buff), "TotDias:%d <ADJ>", sysData.total_days);
+        } else {
+            // Estado: Navegación (foco sobre el ítem de días totales)
+            snprintf(temp_buff, sizeof(temp_buff), "> TotDias:%d", sysData.total_days);
+        }
+    } else {
+        /* Caso 1: Opción para confirmar y persistir los cambios */
+        snprintf(temp_buff, sizeof(temp_buff), "> [GUARDAR]");
+    }
+
+    // --- FORMATEO Y LIMPIEZA ---
+    // El especificador %-16s garantiza que el string se alinee a la izquierda
+    // y se rellene con espacios hasta los 16 caracteres, evitando "fantasmas"
+    // visuales de textos más largos renderizados anteriormente.
+    snprintf(line2, sizeof(line2), "%-16s", temp_buff);
+
+    // --- SALIDA A HARDWARE (I2C) ---
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr(line1);
+
+    HD44780_SetCursor(0, 1);
+    HD44780_PrintStr(line2);
+}
+
+/**
+ * @brief  Renderiza la pantalla de edición para los parámetros de una etapa de incubación.
+ * * Esta función permite al usuario visualizar y modificar los ajustes específicos de la etapa
+ * actual (por ejemplo, Temperatura, Humedad, Día Final y Motor). Utiliza una técnica de
+ * "sobrescritura con espacios" para evitar el parpadeo del LCD que causaría un comando Clear.
+ * * @note   Depende de 'sysData' para los valores de las etapas y de las variables globales
+ * 'config_item' e 'is_editing_val' para el estado de la UI.
+ * * @retval None
+ */
+void render_config_edit(void) {
+    char line1[20];      // Almacena la cadena final formateada para la fila 0
+    char line2[20];      // Almacena la cadena final formateada para la fila 1
+    char temp_buff[20];  // Buffer auxiliar para construir el texto antes del padding
+
+    /* Obtener referencia a la etapa actual mediante puntero para optimizar acceso */
+    StageConfig_t *stage = &sysData.stages[sysData.current_stage_idx];
+
+    // --- FILA 1: Título de la Etapa ---
+    // Se construye el nombre de la configuración y se aplica padding de 16 espacios
+    // para asegurar que cualquier texto anterior quede borrado.
+    snprintf(temp_buff, sizeof(temp_buff), "CFG: %s", stage->name);
+    snprintf(line1, sizeof(line1), "%-16s", temp_buff);
+
+    // --- FILA 2: Selector de Parámetros ---
+    char value_str[12];
+
+    /* Traducción del índice de ítem a una cadena representativa del valor */
+    switch(config_item) {
+        case 0: // Día de finalización de la etapa actual
+            snprintf(value_str, sizeof(value_str), "FinDia:%d", stage->end_day);
+            break;
+        case 1: // Objetivo de temperatura
+            snprintf(value_str, sizeof(value_str), "T:%.1f", stage->temp_target);
+            break;
+        case 2: // Objetivo de humedad relativa
+            snprintf(value_str, sizeof(value_str), "H:%.0f%%", stage->hum_target);
+            break;
+        case 3: // Estado del motor de volteo
+            snprintf(value_str, sizeof(value_str), "Mot:%s", stage->motor_on ? "ON" : "OFF");
+            break;
+        case 4: // Opción de salida del sub-menú
+            snprintf(value_str, sizeof(value_str), "[SALIR]");
+            break;
+    }
+
+    /* Gestión del cursor y modo de edición */
+    if (is_editing_val && config_item != 4) {
+        // Indica visualmente que el sistema está esperando una entrada del usuario (<ADJ>)
+        snprintf(temp_buff, sizeof(temp_buff), "%s <ADJ>", value_str);
+    } else {
+        // Modo navegación: muestra '>' solo si el foco está en el botón [SALIR]
+        snprintf(temp_buff, sizeof(temp_buff), "%c %s", (config_item == 4 ? '>' : ' '), value_str);
+    }
+
+    /* Aplicar padding final para limpiar la fila 2 del LCD */
+    snprintf(line2, sizeof(line2), "%-16s", temp_buff);
+
+    // --- TRANSMISIÓN I2C ---
+    // Envío de las tramas de texto al controlador HD44780
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr(line1);
+
+    HD44780_SetCursor(0, 1);
+    HD44780_PrintStr(line2);
+}
+
+/**
+ * @brief  Renderiza la interfaz de ajuste manual de tiempo del ciclo.
+ * * Permite al usuario modificar el progreso actual del ciclo de incubación (Día, Hora y Minuto).
+ * Esta función visualiza variables temporales de edición, lo que evita modificar el conteo
+ * en tiempo real del sistema hasta que el usuario selecciona la opción "[GUARDAR]".
+ * * @note   Utiliza las variables globales 'edit_day', 'edit_hour' y 'edit_min' como buffers
+ * de entrada antes de la persistencia de datos.
+ * @retval None
+ */
+void render_config_time(void) {
+    char line1[20];      // Buffer para el encabezado
+    char line2[20];      // Buffer para el parámetro seleccionado
+    char temp_buff[20];  // Buffer auxiliar para construcción de strings
+
+    // --- LÍNEA 1: Título de la sección ---
+    // Se utiliza relleno de espacios para limpiar residuos visuales.
+    snprintf(line1, sizeof(line1), "AJUSTAR TIEMPO  ");
+
+    // --- LÍNEA 2: Selección de Parámetro Temporal ---
+    char val_str[10];
+
+    /* Mapeo del ítem seleccionado a su respectiva variable de edición */
+    switch(config_item) {
+        case 0: // Ajuste del día actual del ciclo
+            snprintf(val_str, 10, "Dia:%d", edit_day);
+            break;
+        case 1: // Ajuste de la hora
+            snprintf(val_str, 10, "Hr:%d", edit_hour);
+            break;
+        case 2: // Ajuste de los minutos
+            snprintf(val_str, 10, "Min:%d", edit_min);
+            break;
+        case 3: // Acción de confirmación y guardado
+            snprintf(val_str, 10, "[GUARDAR]");
+            break;
+    }
+
+    /* Gestión visual del modo Edición vs. Navegación */
+    if (is_editing_val && config_item != 3) {
+        // Muestra indicador <ADJ> cuando el valor está siendo incrementado/decrementado
+        snprintf(temp_buff, sizeof(temp_buff), "%s <ADJ>", val_str);
+    } else {
+        // Muestra cursor '>' solo cuando el foco está en el botón de Guardar
+        snprintf(temp_buff, sizeof(temp_buff), "%c %s", (config_item == 3 ? '>' : ' '), val_str);
+    }
+
+    // --- RENDERIZADO FINAL ---
+    // Aplicación de padding de 16 caracteres para asegurar una fila limpia en el LCD
+    snprintf(line2, sizeof(line2), "%-16s", temp_buff);
+
+    HD44780_SetCursor(0, 0);
+    HD44780_PrintStr(line1);
+
+    HD44780_SetCursor(0, 1);
+    HD44780_PrintStr(line2);
+}
+
+void clear_LCD(void) {
+    for (int row = 0; row < LCD_ROWS; row++) {   // Recorre todas las filas
+        HD44780_SetCursor(0, row);               // Posiciona al inicio de la fila
+        for (int col = 0; col < 16; col++) {     // Escribe 16 espacios en la fila
+            SendChar(' ');
+        }
+    }
+    HD44780_SetCursor(0, 0);                     // Vuelve al inicio de la pantalla
+}
+
 
 /**
  * @brief Actualiza el contenido del LCD según el modo actual de la UI.
@@ -552,18 +751,22 @@ void render_config_select(void)
  */
 void update_display(void)
 {
+	if(old_ui_mode != current_ui_mode){
+		clear_LCD();
+		old_ui_mode = current_ui_mode;
+	}
+
     // Proteger el acceso al LCD frente a ISR o tareas concurrentes
-    taskENTER_CRITICAL();
-
-    if      (current_ui_mode == UI_MODE_DASHBOARD)      render_dashboard();
-    else if (current_ui_mode == UI_MODE_MAIN_MENU)      render_menu();
-    else if (current_ui_mode == UI_MODE_TEST_MENU)      render_test_menu();
-    else if (current_ui_mode == UI_MODE_CONFIG_SELECT)  render_config_select();
-    else if (current_ui_mode == UI_MODE_CONFIG_EDIT)    render_config_edit();
-    else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL)  render_config_global();
-    else if (current_ui_mode == UI_MODE_CONFIG_TIME)    render_config_time();
-
-    taskEXIT_CRITICAL();
+	if (xSemaphoreTake(xLcdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+		if      (current_ui_mode == UI_MODE_DASHBOARD)      render_dashboard();
+		else if (current_ui_mode == UI_MODE_MAIN_MENU)      render_menu();
+		else if (current_ui_mode == UI_MODE_TEST_MENU)      render_test_menu();
+		else if (current_ui_mode == UI_MODE_CONFIG_SELECT)  render_config_select();
+		else if (current_ui_mode == UI_MODE_CONFIG_EDIT)    render_config_edit();
+		else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL)  render_config_global();
+		else if (current_ui_mode == UI_MODE_CONFIG_TIME)    render_config_time();
+		xSemaphoreGive(xLcdMutex);
+	}
 }
 
 

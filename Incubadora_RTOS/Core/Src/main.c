@@ -17,11 +17,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "i2c-lcd.h"
-#include <stdio.h>
-#include <string.h> // Necesario para memcpy
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
+#include "semphr.h"
+
+#include "i2c-lcd.h"
 #include "eeprom.h"
 #include "utils.h"
 #include "config.h"
@@ -32,8 +33,6 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
-HumidifierState_t hum_state = HUM_STATE_IDLE;
 
 /* USER CODE END PTD */
 
@@ -50,24 +49,28 @@ HumidifierState_t hum_state = HUM_STATE_IDLE;
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
-TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim12;
 
-UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
-osThreadId menuTaskHandle;
-osThreadId debounceTaskHandle;
-osThreadId MotorTaskHandle;
-osThreadId ControlTaskHandle; // Handle para la nueva tarea
-osThreadId DHT11TaskHandle;
-
-osMessageQId menuQueueHandle;
-
+osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
+
+TaskHandle_t menuTaskHandle;
+TaskHandle_t debounceTaskHandle;
+TaskHandle_t motorTaskHandle;
+TaskHandle_t controlTaskHandle;
+TaskHandle_t sensorTaskHandle;
+
+QueueHandle_t menuQueueHandle;
+SemaphoreHandle_t xLcdMutex;
+SemaphoreHandle_t xDHTMutex;
 
 // --- VARIABLES DE SISTEMA ---
 volatile uint32_t motor_pulse_count = 0;
 uint16_t global_rpm = 0;
+volatile uint8_t is_welcome = 1;
 
 // --- VARIABLES DE CONTROL ---
 float last_valid_temp = 0.0f;
@@ -81,110 +84,15 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_TIM1_Init(void);
-static void MX_USART1_UART_Init(void);
+static void MX_USART3_UART_Init(void);
+static void MX_TIM12_Init(void);
+void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/**
- * @brief Tarea de debounce y detección de pulsaciones del botón del encoder.
- *
- * Esta tarea implementa un debounce por integrador digital y detecta:
- *  - Pulsación corta (BUTTON_PRESS)
- *  - Pulsación larga (BUTTON_LONG_PRESS)
- *
- * Funciona mediante sondeo periódico (polling) y envía eventos a la
- * cola del menú para ser procesados por la tarea de UI.
- *
- * Ventajas del enfoque:
- *  - No bloquea interrupciones
- *  - Filtrado robusto de rebotes mecánicos
- *  - Detección confiable de pulsación larga
- *
- * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
- */
-void StartDebounceTask(void const * argument)
-{
-    /* Integrador digital para debounce:
-       incrementa cuando el botón está presionado,
-       decrementa cuando está liberado */
-    uint8_t integrator = 0;
-
-    /* Estado anterior del botón:
-       1 = liberado
-       0 = presionado */
-    uint8_t prev_state = 1;
-
-    /* Contador de tiempo de pulsación (para long press) */
-    uint32_t hold_counter = 0;
-
-    /* Flag para evitar reenviar múltiples eventos de pulsación larga */
-    uint8_t long_press_sent = 0;
-
-    for (;;)
-    {
-        /* Periodo de muestreo del botón */
-        osDelay(DEBOUNCE_POLL_RATE_MS);
-
-        /* Lectura del pin del botón (activo en nivel bajo) */
-        uint8_t pin_state = HAL_GPIO_ReadPin(
-                                ENCODER_SW_GPIO_Port,
-                                ENCODER_SW_Pin);
-
-        /* ================= DEBOUNCE POR INTEGRADOR ================= */
-
-        if (pin_state == GPIO_PIN_RESET) {
-            /* Botón presionado → integrar hacia arriba */
-            if (integrator < DEBOUNCE_THRESHOLD)
-                integrator++;
-        } else {
-            /* Botón liberado → integrar hacia abajo */
-            if (integrator > 0)
-                integrator--;
-        }
-
-        /* ================= DETECCIÓN DE EVENTOS ================= */
-
-        /* ---- Transición: LIBERADO → PRESIONADO ---- */
-        if (integrator >= DEBOUNCE_THRESHOLD && prev_state == 1) {
-
-            prev_state = 0;        // Nuevo estado: presionado
-            hold_counter = 0;      // Reiniciar contador de hold
-            long_press_sent = 0;   // Habilitar detección de long press
-
-            /* Enviar evento de pulsación corta */
-            MenuEvent_t event = BUTTON_PRESS;
-            osMessagePut(menuQueueHandle, (uint32_t)event, 0);
-        }
-
-        /* ---- Botón mantenido presionado ---- */
-        else if (prev_state == 0 && integrator >= DEBOUNCE_THRESHOLD) {
-
-            hold_counter++;
-
-            /* Detectar pulsación larga */
-            if (hold_counter >= LONG_PRESS_TICKS &&
-                long_press_sent == 0)
-            {
-                long_press_sent = 1;
-
-                MenuEvent_t event = BUTTON_LONG_PRESS;
-                osMessagePut(menuQueueHandle, (uint32_t)event, 0);
-            }
-        }
-
-        /* ---- Transición: PRESIONADO → LIBERADO ---- */
-        else if (integrator == 0 && prev_state == 0) {
-
-            prev_state = 1;        // Volver a estado liberado
-        }
-    }
-}
 
 /**
  * @brief Tarea principal de gestión de menú e interfaz de usuario.
@@ -197,14 +105,25 @@ void StartDebounceTask(void const * argument)
  *
  * La comunicación con las ISR se realiza mediante una cola RTOS.
  *
- * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ * @param argument Parámetro no utilizado
  */
-void StartMenuTask(void const * argument)
+void StartMenuTask(void *argument)
 {
+    if (is_welcome) {
+    	if (xSemaphoreTake(xLcdMutex, pdMS_TO_TICKS(100))) {
+    	        LCD_ShowWelcome("TDII: INCUBADORA");
+    	        xSemaphoreGive(xLcdMutex);
+    	    }
+
+        /* Mantener visible */
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        is_welcome = 0;
+    }
+
     /* Inicializa la pantalla al arrancar la tarea */
     update_display();
 
-    osEvent event;
+    MenuEvent_t event;
     uint32_t last_draw_time = 0;   // Último refresco del LCD
     int needs_update = 0;          // Flag para redibujar pantalla
 
@@ -221,12 +140,10 @@ void StartMenuTask(void const * argument)
     {
         /* Espera evento del menú (encoder / botón)
            Timeout de 200 ms para permitir refresco periódico */
-        event = osMessageGet(menuQueueHandle, 200);
-
-        /* ================= EVENTO RECIBIDO ================= */
-        if (event.status == osEventMessage) {
-
-            MenuEvent_t initial_event = (MenuEvent_t)event.value.v;
+        if (xQueueReceive(menuQueueHandle, &event,
+                          pdMS_TO_TICKS(200)) == pdPASS)
+        {
+            MenuEvent_t initial_event = event;
 
             /* -------- BOTÓN: PRESIÓN LARGA (volver atrás) -------- */
             if (initial_event == BUTTON_LONG_PRESS) {
@@ -246,7 +163,7 @@ void StartMenuTask(void const * argument)
                 }
 
                 needs_update = 1;
-                continue; // Saltear procesamiento del evento
+                continue;
             }
 
             /* -------- PROCESAMIENTO DE MOVIMIENTO -------- */
@@ -260,11 +177,10 @@ void StartMenuTask(void const * argument)
             /* Acumula eventos rápidos del encoder (anti-lag UI) */
             int batch_limit = 20;
             while (batch_limit-- > 0 &&
-                   (event = osMessageGet(menuQueueHandle, 0)).status == osEventMessage)
+                   xQueueReceive(menuQueueHandle, &event, 0) == pdPASS)
             {
-                MenuEvent_t batch_evt = (MenuEvent_t)event.value.v;
-                if (batch_evt == ENCODER_RIGHT) net_movement++;
-                else if (batch_evt == ENCODER_LEFT) net_movement--;
+                if (event == ENCODER_RIGHT) net_movement++;
+                else if (event == ENCODER_LEFT) net_movement--;
             }
 
             /* ================= LÓGICA DE INTERFAZ ================= */
@@ -283,7 +199,8 @@ void StartMenuTask(void const * argument)
 
                 if (net_movement != 0) {
                     int16_t new_pos = selected_item + net_movement;
-                    selected_item = ((new_pos % menu_size) + menu_size) % menu_size;
+                    selected_item =
+                        ((new_pos % menu_size) + menu_size) % menu_size;
 
                     if (selected_item >= menu_top_item + LCD_ROWS)
                         menu_top_item = selected_item - (LCD_ROWS - 1);
@@ -328,7 +245,8 @@ void StartMenuTask(void const * argument)
 
                 if (net_movement != 0) {
                     int16_t new_pos = test_selected_item + net_movement;
-                    test_selected_item = ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
+                    test_selected_item =
+                        ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
 
                     if (test_selected_item >= test_top_item + LCD_ROWS)
                         test_top_item = test_selected_item - (LCD_ROWS - 1);
@@ -349,7 +267,8 @@ void StartMenuTask(void const * argument)
 
                 if (net_movement != 0) {
                     int16_t new_pos = config_sel_index + net_movement;
-                    config_sel_index = ((new_pos % config_menu_sz) + config_menu_sz) % config_menu_sz;
+                    config_sel_index =
+                        ((new_pos % config_menu_sz) + config_menu_sz) % config_menu_sz;
 
                     if (config_sel_index >= config_top_index + LCD_ROWS)
                         config_top_index = config_sel_index - (LCD_ROWS - 1);
@@ -376,7 +295,7 @@ void StartMenuTask(void const * argument)
                         config_item = 0;
                         is_editing_val = 0;
 
-                        edit_day = Get_Current_Day();
+                        edit_day  = Get_Current_Day();
                         if (edit_day == 0) edit_day = 1;
                         edit_hour = Get_Current_Hour();
                         edit_min  = Get_Current_Minute();
@@ -432,10 +351,9 @@ void StartMenuTask(void const * argument)
                 }
             }
         }
-
         /* ================= TIMEOUT (UPDATE-ON-CHANGE) ================= */
-        else if (event.status == osEventTimeout) {
-
+        else
+        {
             if (current_ui_mode == UI_MODE_DASHBOARD) {
 
                 uint8_t day  = Get_Current_Day();
@@ -477,6 +395,103 @@ void StartMenuTask(void const * argument)
     }
 }
 
+/**
+ * @brief Tarea de debounce y detección de pulsaciones del botón del encoder.
+ *
+ * Esta tarea implementa un debounce por integrador digital y detecta:
+ *  - Pulsación corta (BUTTON_PRESS)
+ *  - Pulsación larga (BUTTON_LONG_PRESS)
+ *
+ * Funciona mediante sondeo periódico (polling) y envía eventos a la
+ * cola del menú para ser procesados por la tarea de UI.
+ *
+ * Ventajas del enfoque:
+ *  - No bloquea interrupciones
+ *  - Filtrado robusto de rebotes mecánicos
+ *  - Detección confiable de pulsación larga
+ *
+ * @param argument Parámetro no utilizado
+ */
+void StartDebounceTask(void *argument)
+{
+    /* Integrador digital para debounce:
+       incrementa cuando el botón está presionado,
+       decrementa cuando está liberado */
+    uint8_t integrator = 0;
+
+    /* Estado anterior del botón:
+       1 = liberado
+       0 = presionado */
+    uint8_t prev_state = 1;
+
+    /* Contador de tiempo de pulsación (para long press) */
+    uint32_t hold_counter = 0;
+
+    /* Flag para evitar reenviar múltiples eventos de pulsación larga */
+    uint8_t long_press_sent = 0;
+
+    const TickType_t poll_delay = pdMS_TO_TICKS(DEBOUNCE_POLL_RATE_MS);
+
+    for (;;)
+    {
+        /* Periodo de muestreo del botón */
+        vTaskDelay(poll_delay);
+
+        /* Lectura del pin del botón (activo en nivel bajo) */
+        uint8_t pin_state = HAL_GPIO_ReadPin(
+                                ENCODER_SW_GPIO_Port,
+                                ENCODER_SW_Pin);
+
+        /* ================= DEBOUNCE POR INTEGRADOR ================= */
+
+        if (pin_state == GPIO_PIN_RESET) {
+            /* Botón presionado → integrar hacia arriba */
+            if (integrator < DEBOUNCE_THRESHOLD)
+                integrator++;
+        } else {
+            /* Botón liberado → integrar hacia abajo */
+            if (integrator > 0)
+                integrator--;
+        }
+
+        /* ================= DETECCIÓN DE EVENTOS ================= */
+
+        /* ---- Transición: LIBERADO → PRESIONADO ---- */
+        if (integrator >= DEBOUNCE_THRESHOLD && prev_state == 1) {
+
+            prev_state = 0;        // Nuevo estado: presionado
+            hold_counter = 0;      // Reiniciar contador de hold
+            long_press_sent = 0;   // Habilitar detección de long press
+
+            /* Enviar evento de pulsación corta */
+            MenuEvent_t event = BUTTON_PRESS;
+            xQueueSend(menuQueueHandle, &event, 0);
+        }
+
+        /* ---- Botón mantenido presionado ---- */
+        else if (prev_state == 0 && integrator >= DEBOUNCE_THRESHOLD) {
+
+            hold_counter++;
+
+            /* Detectar pulsación larga */
+            if (hold_counter >= LONG_PRESS_TICKS &&
+                long_press_sent == 0)
+            {
+                long_press_sent = 1;
+
+                MenuEvent_t event = BUTTON_LONG_PRESS;
+                xQueueSend(menuQueueHandle, &event, 0);
+            }
+        }
+
+        /* ---- Transición: PRESIONADO → LIBERADO ---- */
+        else if (integrator == 0 && prev_state == 0) {
+
+            prev_state = 1;        // Volver a estado liberado
+        }
+    }
+}
+
 
 /**
  * @brief Tarea de cálculo de RPM del motor.
@@ -493,20 +508,23 @@ void StartMenuTask(void const * argument)
  * El uso de una sección crítica garantiza coherencia de datos entre
  * interrupciones y contexto de tarea.
  *
- * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
+ * @param argument Parámetro no utilizado
  */
-void StartMotorTask(void const * argument)
+void StartMotorTask(void *argument)
 {
     /* Variable local para capturar los pulsos acumulados
        durante el intervalo de medición */
     uint32_t pulses_snapshot = 0;
 
+    const TickType_t calc_delay =
+        pdMS_TO_TICKS(MOTOR_CALC_INTERVAL_MS);
+
     for (;;)
     {
         /* Espera fija entre cálculos de RPM */
-        osDelay(MOTOR_CALC_INTERVAL_MS);
+        vTaskDelay(calc_delay);
 
-        /* ================= SECCIÓN CRÍTICA =================
+        /* ================= SECCIÓN CR�?TICA =================
            Protege el acceso a motor_pulse_count, que es
            modificada desde una ISR (EXTI / sensor de motor) */
         taskENTER_CRITICAL();
@@ -524,7 +542,7 @@ void StartMotorTask(void const * argument)
            RPM = (pulsos * 60s * 1000ms) / (slots * intervalo_ms)
         */
         uint32_t calculated_rpm =
-            (pulses_snapshot * 60 * 1000) /
+            (pulses_snapshot * 60UL * 1000UL) /
             (ENCODER_SLOTS * MOTOR_CALC_INTERVAL_MS);
 
         /* Guardar RPM calculada (limitada a 16 bits) */
@@ -535,6 +553,7 @@ void StartMotorTask(void const * argument)
         liveStatus.rpm_current = global_rpm;
     }
 }
+
 
 /**
  * @brief Tarea principal de control ambiental de la incubadora.
@@ -554,7 +573,7 @@ void StartMotorTask(void const * argument)
  *
  * @param argument Parámetro no utilizado (requerido por CMSIS-RTOS)
  */
-void StartControlTask(void const * argument)
+void StartControlTask(void * argument)
 {
     /* ============================================================
        INICIALIZACIÓN SEGURA
@@ -578,7 +597,7 @@ void StartControlTask(void const * argument)
         uint32_t now = HAL_GetTick();
 
         /* ============================================================
-           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL DÍA DE INCUBACIÓN
+           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL D�?A DE INCUBACIÓN
            ============================================================ */
         Get_Active_Targets(&target_t, &target_h, &motor_enabled);
 
@@ -591,7 +610,7 @@ void StartControlTask(void const * argument)
         /* Si el sistema está pausado o fuera de ciclo,
            no se ejecuta control activo */
         if (target_t == 0) {
-            osDelay(1000);
+        	vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
@@ -615,8 +634,8 @@ void StartControlTask(void const * argument)
                 last_valid_temp = 20.0f;
 
             /* Actualizar valores globales de estado */
-            liveStatus.temp_current = last_valid_temp;
-            liveStatus.hum_current  = last_valid_hum;
+//liveStatus.temp_current = last_valid_temp;
+            //liveStatus.hum_current  = last_valid_hum;
 
             last_dht_read_time = now;
         }
@@ -685,20 +704,21 @@ void StartControlTask(void const * argument)
         /* ============================================================
            5. RETARDO DEL LAZO DE CONTROL
            ============================================================ */
-        osDelay(CONTROL_LOOP_MS);
+        vTaskDelay(pdMS_TO_TICKS(CONTROL_LOOP_MS));
     }
 }
 
+void StartSensorTask(void *argument){
+    TickType_t lastWake = xTaskGetTickCount();
 
-void StartDHT11Task(void const * argument){
-	TickType_t demora = 1000;
-	TickType_t tiempo_medido = 0;
-	if(xTaskGetTickCount() - tiempo_medido > demora){
+    for (;;)
+    {
+        /* Pauso scheduler para mantener timing fino del DHT11 */
 		DHT11_GetDatos();
-		tiempo_medido = xTaskGetTickCount();
-	}
-}
 
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(1000));
+    }
+}
 
 /* USER CODE END 0 */
 
@@ -732,27 +752,23 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
-  MX_TIM1_Init();
-  MX_USART1_UART_Init();
+  MX_USART3_UART_Init();
+  MX_TIM12_Init();
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
   Enable_Internal_Pullups(); // Anti-ruido I2C
   I2C_Scan();                // Escaneo
-
+  HD44780_Init(LCD_ROWS);
   // Cargar configuración guardada
   Load_Config_From_Flash();
-
-  LCD_ShowWelcome(
-		  LCD_ROWS,            // Filas
-		  "TDII: INCUBADORA",  // Mensaje
-		  1000                 // 1 segundo
-  );
 
   DHT11_Init();
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
+  xLcdMutex = xSemaphoreCreateMutex();
+  xDHTMutex = xSemaphoreCreateMutex();
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -761,36 +777,22 @@ int main(void)
   /* USER CODE BEGIN RTOS_TIMERS */
   /* USER CODE END RTOS_TIMERS */
 
-  /* Create the queue(s) */
-  /* definition and creation of menuQueue */
-  osMessageQDef(menuQueue, 32, uint32_t);
-  menuQueueHandle = osMessageCreate(osMessageQ(menuQueue), NULL);
-
   /* USER CODE BEGIN RTOS_QUEUES */
+  menuQueueHandle = xQueueCreate(32, sizeof(uint32_t));
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of menuTask */
-  osThreadDef(menuTask, StartMenuTask, osPriorityNormal, 0, 512);
-  menuTaskHandle = osThreadCreate(osThread(menuTask), NULL);
-
-  /* definition and creation of debounceTask */
-  osThreadDef(debounceTask, StartDebounceTask, osPriorityIdle, 0, 128);
-  debounceTaskHandle = osThreadCreate(osThread(debounceTask), NULL);
-
-  /* definition and creation of MotorTask */
-  osThreadDef(MotorTask, StartMotorTask, osPriorityIdle, 0, 128);
-  MotorTaskHandle = osThreadCreate(osThread(MotorTask), NULL);
-
-  // definition and creation of ControlTask
-  osThreadDef(ControlTask, StartControlTask, osPriorityNormal, 0, 512);
-  ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
-
-  // definition and creation of ControlTask
-  osThreadDef(DHT11Task, StartDHT11Task, osPriorityNormal, 0, 512);
-  DHT11TaskHandle = osThreadCreate(osThread(DHT11Task), NULL);
+  /* definition and creation of defaultTask */
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityLow, 0, 128);
+  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
+  xTaskCreate(StartMenuTask, "Menu", 1024, NULL, osPriorityAboveNormal, &menuTaskHandle);
+  xTaskCreate(StartDebounceTask, "Debounce", 128, NULL, osPriorityNormal, &debounceTaskHandle);
+  //xTaskCreate(StartMotorTask, "Motor", 128, NULL, osPriorityNormal, &motorTaskHandle);
+  xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);
+  xTaskCreate(StartSensorTask, "Sensor", 1024, NULL, osPriorityAboveNormal, &sensorTaskHandle);
+
   /* USER CODE END RTOS_THREADS */
 
   /* Start scheduler */
@@ -888,81 +890,40 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief TIM1 Initialization Function
+  * @brief TIM12 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM1_Init(void)
+static void MX_TIM12_Init(void)
 {
 
-  /* USER CODE BEGIN TIM1_Init 0 */
+  /* USER CODE BEGIN TIM12_Init 0 */
 
-  /* USER CODE END TIM1_Init 0 */
+  /* USER CODE END TIM12_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM1_Init 1 */
+  /* USER CODE BEGIN TIM12_Init 1 */
 
-  /* USER CODE END TIM1_Init 1 */
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 84-1;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  /* USER CODE END TIM12_Init 1 */
+  htim12.Instance = TIM12;
+  htim12.Init.Prescaler = 83;
+  htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim12.Init.Period = 65535;
+  htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim12) != HAL_OK)
   {
     Error_Handler();
   }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  if (HAL_TIM_ConfigClockSource(&htim12, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM1_Init 2 */
+  /* USER CODE BEGIN TIM12_Init 2 */
 
-  /* USER CODE END TIM1_Init 2 */
-
-}
-
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
+  /* USER CODE END TIM12_Init 2 */
 
 }
 
@@ -1000,6 +961,39 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -1015,10 +1009,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|COOLER_Pin|DHT11_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|HUMIDIFICADOR_Pin|COOLER_Pin|DHT11_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, HUMIDIFICADOR_Pin|buzzer_Pin|LUZ_Pin|MOTOR_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LAMPARA_Pin|BUZZER_Pin|MOTOR_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -1044,8 +1038,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD2_Pin DHT11_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin|DHT11_Pin;
+  /*Configure GPIO pins : LD2_Pin HUMIDIFICADOR_Pin COOLER_Pin DHT11_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|HUMIDIFICADOR_Pin|COOLER_Pin|DHT11_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1057,19 +1051,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENCODER_SW_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : HUMIDIFICADOR_Pin buzzer_Pin LUZ_Pin MOTOR_Pin */
-  GPIO_InitStruct.Pin = HUMIDIFICADOR_Pin|buzzer_Pin|LUZ_Pin|MOTOR_Pin;
+  /*Configure GPIO pins : LAMPARA_Pin BUZZER_Pin MOTOR_Pin */
+  GPIO_InitStruct.Pin = LAMPARA_Pin|BUZZER_Pin|MOTOR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : COOLER_Pin */
-  GPIO_InitStruct.Pin = COOLER_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(COOLER_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
@@ -1189,8 +1176,25 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 
 
-//* USER CODE END 4 */
+/* USER CODE END 4 */
 
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
 
  /**
   * @brief  Period elapsed callback in non blocking mode
