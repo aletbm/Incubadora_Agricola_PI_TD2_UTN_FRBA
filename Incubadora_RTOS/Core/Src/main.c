@@ -576,11 +576,6 @@ void StartControlTask(void * argument)
        Asegura que todos los actuadores estén apagados al inicio
        (Active Low → HIGH = OFF)
        ============================================================ */
-	apagar_cooler();
-	apagar_humidificador();
-	apagar_lampara();
-	apagar_motor();
-	apagar_buzzer();
 
     /* Variables de control */
     float target_t = 0;          // Temperatura objetivo
@@ -593,7 +588,7 @@ void StartControlTask(void * argument)
         uint32_t now = HAL_GetTick();
 
         /* ============================================================
-           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL D�?A DE INCUBACIÓN
+           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL DIA DE INCUBACIÓN
            ============================================================ */
         Get_Active_Targets(&target_t, &target_h, &motor_enabled);
 
@@ -750,6 +745,8 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
   MX_TIM12_Init();
+
+
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
@@ -760,6 +757,7 @@ int main(void)
   Load_Config_From_Flash();
 
   DHT11_Init();
+  RELES_Init();
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -785,7 +783,7 @@ int main(void)
   xTaskCreate(StartMenuTask, "Menu", 1024, NULL, osPriorityRealtime, &menuTaskHandle);
   xTaskCreate(StartDebounceTask, "Debounce", 128, NULL, osPriorityNormal, &debounceTaskHandle);
   //xTaskCreate(StartMotorTask, "Motor", 128, NULL, osPriorityNormal, &motorTaskHandle);
-  xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);
+  //xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);
   xTaskCreate(StartSensorTask, "Sensor", 1024, NULL, osPriorityAboveNormal, &sensorTaskHandle);
 
   /* USER CODE END RTOS_THREADS */
