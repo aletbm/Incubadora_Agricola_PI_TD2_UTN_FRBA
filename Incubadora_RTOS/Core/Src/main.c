@@ -67,7 +67,7 @@ QueueHandle_t menuQueueHandle;
 SemaphoreHandle_t xDHTMutex;
 
 // --- VARIABLES DE SISTEMA ---
-volatile uint32_t motor_pulse_count = 0;
+volatile uint32_t pulsos_acumulados = 0;
 uint16_t global_rpm = 0;
 volatile uint8_t is_welcome = 1;
 
@@ -586,8 +586,8 @@ void StartMotorTask(void *argument)
            Protege el acceso a motor_pulse_count, que es
            modificada desde una ISR (EXTI / sensor de motor) */
         taskENTER_CRITICAL();
-        pulses_snapshot = motor_pulse_count;  // Copia atómica
-        motor_pulse_count = 0;                 // Reinicio del contador
+        pulses_snapshot = pulsos_acumulados;  // Copia atómica
+        pulsos_acumulados = 0;                 // Reinicio del contador
         taskEXIT_CRITICAL();
         /* =================================================== */
 
@@ -653,6 +653,22 @@ void StartControlTask(void * argument)
 	    char msg_buffer[128];
 	    uint32_t last_telegram_tick = 0;
 	    const uint32_t TELEGRAM_COOLDOWN = 30000; // 1 mensaje por medio minuto máximo
+
+	    /* ============== CONFIGURACIÓN VOLTEO ============== */
+		// Cada cuánto tiempo se activa (2 Horas = 7,200,000 ms)
+		const uint32_t INTERVALO_VOLTEO_MS = 60000;
+
+		// CANTIDAD DE PULSOS para un giro perfecto
+
+		const uint32_t PULSOS_OBJETIVO = 50;
+
+		// Timeout de seguridad: Si en 20 seg no llegó a los pulsos, corta igual.
+		const uint32_t TIEMPO_MAXIMO_SEGURIDAD = 200000;
+
+		uint32_t ultimo_volteo_tick = 0; // Para medir las 2 horas
+		uint8_t  is_motor_turning = 0;   // Estado interno
+		/* ================================================== */
+
 
 	    // Sincronización inicial
 	    vTaskDelay(pdMS_TO_TICKS(2000));
@@ -847,8 +863,51 @@ void StartControlTask(void * argument)
 	             }
 	        }
 
-	        // Control Motor (Volteo)
-	        if (motor_enabled == 0) apagar_motor();
+	        if (motor_enabled) { // Solo si la etapa (Ej: Desarrollo) lo permite
+
+				// 1. INICIAR EL GIRO
+				// Si no está girando Y pasaron 2 horas desde el último volteo
+				if (!is_motor_turning && (now - ultimo_volteo_tick >= INTERVALO_VOLTEO_MS)) {
+
+					// Reseteamos el contador de pulsos a 0 de forma segura
+					taskENTER_CRITICAL();
+					pulsos_acumulados = 0;
+					taskEXIT_CRITICAL();
+
+					encender_motor();
+					is_motor_turning = 1;      // Flag: Estamos girando
+					ultimo_volteo_tick = now;  // Reiniciamos el cronómetro de 2 horas
+				}
+
+				// 2. DETENER EL GIRO
+				// Si está girando actualmente...
+				if (is_motor_turning) {
+
+					// Leemos los pulsos actuales
+					uint32_t pulsos_actuales;
+					taskENTER_CRITICAL();
+					pulsos_actuales = pulsos_acumulados;
+					taskEXIT_CRITICAL();
+
+					// CONDICIÓN DE CORTE:
+					// A. Llegamos a la cantidad de pulsos deseada (Posición correcta)
+					// B. O pasó demasiado tiempo (Seguridad por si se rompe la correa/sensor)
+					if ((pulsos_actuales >= PULSOS_OBJETIVO) ||
+						((now - ultimo_volteo_tick) > TIEMPO_MAXIMO_SEGURIDAD))
+					{
+						apagar_motor();
+						is_motor_turning = 0; // Fin del giro
+					}
+				}
+
+			} else {
+				// Si cambiamos de etapa (a Eclosión) y el motor estaba andando,
+				// lo apagamos inmediatamente.
+				if (is_motor_turning || (estado_motor() == RELE_ACTIVO)) {
+					apagar_motor();
+					is_motor_turning = 0;
+				}
+			}
 
 	        vTaskDelay(pdMS_TO_TICKS(1000));
 	    }
@@ -1240,14 +1299,13 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    /* ================= SENSOR DE MOTOR ================= */
-
-    // Si la interrupción proviene del sensor de RPM del motor
-    if (GPIO_Pin == MOTOR_SENSOR_PIN) {
-        // Incrementar contador de pulsos (usado luego para cálculo de RPM)
-        motor_pulse_count++;
-        return; // Salir rápido para minimizar tiempo en ISR
-    }
+	/* ================= SENSOR DE MOTOR ================= */
+	    // Si la interrupción proviene del sensor de RPM del motor
+	    if (GPIO_Pin == MOTOR_SENSOR_PIN) {
+	        // Incrementamos ambas variables:
+	        pulsos_acumulados++;
+	        return;
+	    }
 
     /* ================= ENCODER ROTATIVO ================= */
 
