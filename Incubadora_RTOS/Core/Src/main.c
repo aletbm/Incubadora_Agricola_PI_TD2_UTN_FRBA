@@ -106,12 +106,12 @@ void StartDefaultTask(void const * argument);
  *
  * @param argument Parámetro no utilizado
  */
+
 void StartMenuTask(void *argument)
 {
+    /* Mensaje de bienvenida */
     if (is_welcome) {
-    	LCD_ShowWelcome("TDII: INCUBADORA");
-
-        /* Mantener visible */
+        LCD_ShowWelcome("TDII: INCUBADORA");
         vTaskDelay(pdMS_TO_TICKS(1000));
         is_welcome = 0;
     }
@@ -135,23 +135,20 @@ void StartMenuTask(void *argument)
     for (;;)
     {
         /* Espera evento del menú (encoder / botón)
-           Timeout de 200 ms para permitir refresco periódico */
-        if (xQueueReceive(menuQueueHandle, &event,
-                          pdMS_TO_TICKS(200)) == pdPASS)
+           Timeout de 200 ms para permitir refresco periódico del dashboard */
+        if (xQueueReceive(menuQueueHandle, &event, pdMS_TO_TICKS(200)) == pdPASS)
         {
             MenuEvent_t initial_event = event;
 
             /* -------- BOTÓN: PRESIÓN LARGA (volver atrás) -------- */
             if (initial_event == BUTTON_LONG_PRESS) {
-
+                // Si estamos en cualquier sub-menú de edición o test, volvemos al menú principal
                 if (current_ui_mode == UI_MODE_TEST_MENU ||
                     current_ui_mode == UI_MODE_CONFIG_EDIT ||
                     current_ui_mode == UI_MODE_CONFIG_GLOBAL ||
-                    current_ui_mode == UI_MODE_CONFIG_TIME)
+                    current_ui_mode == UI_MODE_CONFIG_TIME ||
+                    current_ui_mode == UI_MODE_CONFIG_SELECT)
                 {
-                    current_ui_mode = UI_MODE_MAIN_MENU;
-                }
-                else if (current_ui_mode == UI_MODE_CONFIG_SELECT) {
                     current_ui_mode = UI_MODE_MAIN_MENU;
                 }
                 else if (current_ui_mode == UI_MODE_MAIN_MENU) {
@@ -159,7 +156,7 @@ void StartMenuTask(void *argument)
                 }
 
                 needs_update = 1;
-                continue;
+                continue; // Saltar el resto del bucle
             }
 
             /* -------- PROCESAMIENTO DE MOVIMIENTO -------- */
@@ -172,8 +169,7 @@ void StartMenuTask(void *argument)
 
             /* Acumula eventos rápidos del encoder (anti-lag UI) */
             int batch_limit = 20;
-            while (batch_limit-- > 0 &&
-                   xQueueReceive(menuQueueHandle, &event, 0) == pdPASS)
+            while (batch_limit-- > 0 && xQueueReceive(menuQueueHandle, &event, 0) == pdPASS)
             {
                 if (event == ENCODER_RIGHT) net_movement++;
                 else if (event == ENCODER_LEFT) net_movement--;
@@ -195,8 +191,7 @@ void StartMenuTask(void *argument)
 
                 if (net_movement != 0) {
                     int16_t new_pos = selected_item + net_movement;
-                    selected_item =
-                        ((new_pos % menu_size) + menu_size) % menu_size;
+                    selected_item = ((new_pos % menu_size) + menu_size) % menu_size;
 
                     if (selected_item >= menu_top_item + LCD_ROWS)
                         menu_top_item = selected_item - (LCD_ROWS - 1);
@@ -207,42 +202,42 @@ void StartMenuTask(void *argument)
                 }
 
                 if (button_pressed) {
-
                     if (selected_item == 1) { // INICIAR / PAUSAR
+                        /* OPTIMIZACIÓN: Calcular y Guardar UNA sola vez */
                         if (sysData.is_running) {
-                            Save_Config_To_Flash();
+                            // Pausando: Calcular tiempo transcurrido y sumar
+                            uint32_t current_session_min = (HAL_GetTick() - sysData.last_boot_tick) / 60000U;
+                            sysData.saved_timestamp += current_session_min;
                             sysData.is_running = 0;
-                            Save_Config_To_Flash();
                         } else {
+                            // Iniciando: Resetear tick de referencia
                             sysData.is_running = 1;
                             sysData.last_boot_tick = HAL_GetTick();
-                            Save_Config_To_Flash();
                         }
+                        // Guardado único para no congelar la UI dos veces
+                        Save_Config_To_Flash();
                     }
-                    else if (selected_item == 2) {
+                    else if (selected_item == 2) { // CONFIGURACION
                         current_ui_mode = UI_MODE_CONFIG_SELECT;
                         config_sel_index = 0;
                         config_top_index = 0;
                     }
-                    else if (selected_item == 3) {
+                    else if (selected_item == 3) { // TEST
                         current_ui_mode = UI_MODE_TEST_MENU;
                         test_selected_item = 0;
                     }
-                    else {
+                    else { // VOLVER / VER SENSORES
                         current_ui_mode = UI_MODE_DASHBOARD;
                     }
-
                     needs_update = 1;
                 }
             }
 
             /* -------- MENÚ DE TEST -------- */
             else if (current_ui_mode == UI_MODE_TEST_MENU) {
-
                 if (net_movement != 0) {
                     int16_t new_pos = test_selected_item + net_movement;
-                    test_selected_item =
-                        ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
+                    test_selected_item = ((new_pos % test_menu_size) + test_menu_size) % test_menu_size;
 
                     if (test_selected_item >= test_top_item + LCD_ROWS)
                         test_top_item = test_selected_item - (LCD_ROWS - 1);
@@ -251,7 +246,6 @@ void StartMenuTask(void *argument)
 
                     needs_update = 1;
                 }
-
                 if (button_pressed) {
                     toggle_output(test_selected_item);
                     needs_update = 1;
@@ -260,11 +254,9 @@ void StartMenuTask(void *argument)
 
             /* -------- SELECCIÓN DE CONFIGURACIÓN -------- */
             else if (current_ui_mode == UI_MODE_CONFIG_SELECT) {
-
                 if (net_movement != 0) {
                     int16_t new_pos = config_sel_index + net_movement;
-                    config_sel_index =
-                        ((new_pos % config_menu_sz) + config_menu_sz) % config_menu_sz;
+                    config_sel_index = ((new_pos % config_menu_sz) + config_menu_sz) % config_menu_sz;
 
                     if (config_sel_index >= config_top_index + LCD_ROWS)
                         config_top_index = config_sel_index - (LCD_ROWS - 1);
@@ -275,40 +267,109 @@ void StartMenuTask(void *argument)
                 }
 
                 if (button_pressed) {
-                    if (config_sel_index <= 1) {
+                    if (config_sel_index <= 1) { // Desarrollo o Eclosión
                         sysData.current_stage_idx = config_sel_index;
                         current_ui_mode = UI_MODE_CONFIG_EDIT;
                         config_item = 0;
                         is_editing_val = 0;
                     }
-                    else if (config_sel_index == 2) {
+                    else if (config_sel_index == 2) { // Ciclo Total
                         current_ui_mode = UI_MODE_CONFIG_GLOBAL;
                         config_item = 0;
                         is_editing_val = 0;
                     }
-                    else if (config_sel_index == 3) {
+                    else if (config_sel_index == 3) { // Ajustar Tiempo
                         current_ui_mode = UI_MODE_CONFIG_TIME;
                         config_item = 0;
                         is_editing_val = 0;
-
+                        // Cargar valores actuales en variables temporales
                         edit_day  = Get_Current_Day();
                         if (edit_day == 0) edit_day = 1;
                         edit_hour = Get_Current_Hour();
                         edit_min  = Get_Current_Minute();
                     }
-                    else {
+                    else { // Volver
                         current_ui_mode = UI_MODE_MAIN_MENU;
                     }
-
                     needs_update = 1;
                 }
             }
 
-            /* -------- CONFIGURACIÓN DE TIEMPO -------- */
-            else if (current_ui_mode == UI_MODE_CONFIG_TIME) {
+            /* -------- CONFIGURACIÓN: EDICIÓN DE ETAPA (LO QUE FALTABA) -------- */
+            else if (current_ui_mode == UI_MODE_CONFIG_EDIT) {
+                StageConfig_t *st = &sysData.stages[sysData.current_stage_idx];
 
                 if (button_pressed) {
-                    if (config_item == 3) {
+                    if (config_item == 4) { // [SALIR]
+                        Save_Config_To_Flash();
+                        current_ui_mode = UI_MODE_CONFIG_SELECT;
+                    } else {
+                        is_editing_val = !is_editing_val;
+                    }
+                    needs_update = 1;
+                }
+
+                if (net_movement != 0) {
+                    if (!is_editing_val) {
+                        config_item += net_movement;
+                        if (config_item < 0) config_item = 4;
+                        if (config_item > 4) config_item = 0;
+                    } else {
+                        switch(config_item) {
+                            case 0: // Fin Día
+                                st->end_day += net_movement;
+                                if(st->end_day < 1) st->end_day = 1;
+                                break;
+                            case 1: // Temp
+                                st->temp_target += (net_movement * 0.1f);
+                                if(st->temp_target > 42.0f) st->temp_target = 42.0f; // Límites
+                                if(st->temp_target < 20.0f) st->temp_target = 20.0f;
+                                break;
+                            case 2: // Hum
+                                st->hum_target += (float)net_movement;
+                                if(st->hum_target > 90.0f) st->hum_target = 90.0f;
+                                if(st->hum_target < 20.0f) st->hum_target = 20.0f;
+                                break;
+                            case 3: // Motor
+                                if(net_movement != 0) st->motor_on = !st->motor_on;
+                                break;
+                        }
+                    }
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- CONFIGURACIÓN: GLOBAL (LO QUE FALTABA) -------- */
+            else if (current_ui_mode == UI_MODE_CONFIG_GLOBAL) {
+                if (button_pressed) {
+                    if (config_item == 1) { // [GUARDAR]
+                        Save_Config_To_Flash();
+                        current_ui_mode = UI_MODE_CONFIG_SELECT;
+                    } else {
+                        is_editing_val = !is_editing_val;
+                    }
+                    needs_update = 1;
+                }
+
+                if (net_movement != 0) {
+                    if (!is_editing_val) {
+                        config_item += net_movement;
+                        if (config_item < 0) config_item = 1;
+                        if (config_item > 1) config_item = 0;
+                    } else {
+                        if (config_item == 0) { // Total Días
+                            sysData.total_days += net_movement;
+                            if (sysData.total_days < 1) sysData.total_days = 1;
+                        }
+                    }
+                    needs_update = 1;
+                }
+            }
+
+            /* -------- CONFIGURACIÓN: TIEMPO -------- */
+            else if (current_ui_mode == UI_MODE_CONFIG_TIME) {
+                if (button_pressed) {
+                    if (config_item == 3) { // [GUARDAR]
                         uint32_t new_total_mins =
                             ((uint32_t)(edit_day - 1) * 1440) +
                             ((uint32_t)edit_hour * 60) +
@@ -318,8 +379,7 @@ void StartMenuTask(void *argument)
                         sysData.last_boot_tick = HAL_GetTick();
                         Save_Config_To_Flash();
                         current_ui_mode = UI_MODE_CONFIG_SELECT;
-                    }
-                    else {
+                    } else {
                         is_editing_val = !is_editing_val;
                     }
                     needs_update = 1;
@@ -330,17 +390,18 @@ void StartMenuTask(void *argument)
                         config_item += net_movement;
                         if (config_item < 0) config_item = 3;
                         if (config_item > 3) config_item = 0;
-                    }
-                    else {
-                        if (config_item == 0) {
-                            edit_day += net_movement;
-                            if (edit_day < 1) edit_day = 1;
-                        }
-                        else if (config_item == 1) {
-                            edit_hour = (edit_hour + net_movement + 24) % 24;
-                        }
-                        else if (config_item == 2) {
-                            edit_min = (edit_min + net_movement + 60) % 60;
+                    } else {
+                        switch (config_item) {
+                            case 0: // Día
+                                edit_day += net_movement;
+                                if (edit_day < 1) edit_day = 1;
+                                break;
+                            case 1: // Hora
+                                edit_hour = (edit_hour + net_movement + 24) % 24;
+                                break;
+                            case 2: // Min
+                                edit_min = (edit_min + net_movement + 60) % 60;
+                                break;
                         }
                     }
                     needs_update = 1;
@@ -351,7 +412,7 @@ void StartMenuTask(void *argument)
         else
         {
             if (current_ui_mode == UI_MODE_DASHBOARD) {
-
+                // Chequear cambios usando liveStatus
                 uint8_t day  = Get_Current_Day();
                 uint8_t hour = Get_Current_Hour();
 
@@ -371,8 +432,7 @@ void StartMenuTask(void *argument)
         /* ================= DIBUJO CONTROLADO ================= */
         uint32_t current_time = HAL_GetTick();
 
-        if (needs_update &&
-            (current_time - last_draw_time >= MIN_DRAW_INTERVAL_MS))
+        if (needs_update && (current_time - last_draw_time >= MIN_DRAW_INTERVAL_MS))
         {
             if (current_ui_mode == UI_MODE_DASHBOARD) {
                 last_disp_temp = liveStatus.temp_current;
@@ -390,6 +450,8 @@ void StartMenuTask(void *argument)
         }
     }
 }
+
+
 
 /**
  * @brief Tarea de debounce y detección de pulsaciones del botón del encoder.
@@ -571,132 +633,188 @@ void StartMotorTask(void *argument)
  */
 void StartControlTask(void * argument)
 {
-    /* ============================================================
-       INICIALIZACIÓN SEGURA
-       Asegura que todos los actuadores estén apagados al inicio
-       (Active Low → HIGH = OFF)
-       ============================================================ */
+	/**
+	 * @brief Tarea de Control Avanzado: 3 Estados Térmicos + Humedad Pulsante.
+	 */
 
-    /* Variables de control */
-    float target_t = 0;          // Temperatura objetivo
-    float target_h = 0;          // Humedad objetivo
-    uint8_t motor_enabled = 0;   // Estado del motor (etapa)
-    uint32_t hum_timer_start = 0;// Temporizador máquina de humedad
+	    // Variables de Objetivos
+	    float target_t = 0.0f;
+	    float target_h = 0.0f;
+	    uint8_t motor_enabled = 0;
 
-    for (;;)
-    {
-        uint32_t now = HAL_GetTick();
+	    // --- TIMERS Y FLAGS DE ALARMA TEMPERATURA ---
+	    uint32_t timer_tolerable_start = 0;
+	    uint8_t  flag_tolerable_active = 0;
 
-        /* ============================================================
-           1. OBTENER OBJETIVOS ACTIVOS SEGÚN EL DIA DE INCUBACIÓN
-           ============================================================ */
-        Get_Active_Targets(&target_t, &target_h, &motor_enabled);
+	    uint32_t timer_critical_start = 0;
+	    uint8_t  flag_critical_active = 0;
 
-        /* Actualización de información en tiempo real (UI / Debug) */
-        liveStatus.day_current  = Get_Current_Day();
-        liveStatus.hour_current = Get_Current_Hour();
-        liveStatus.temp_target  = target_t;
-        liveStatus.hum_target   = target_h;
+	    // --- TIMERS HUMEDAD ---
+	    uint32_t hum_pulse_timer = 0;   // Para el ciclo ON/OFF
+	    uint32_t hum_alarm_timer = 0;   // Para la alarma de tiempo
+	    uint8_t  flag_hum_alarm_active = 0;
 
-        /* Si el sistema está pausado o fuera de ciclo,
-           no se ejecuta control activo */
-        if (target_t == 0) {
-        	vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
+	    // Sincronización inicial para que el DHT11 tenga datos
+	    vTaskDelay(pdMS_TO_TICKS(2000));
 
-        /* ============================================================
-           2. LECTURA DE SENSOR (SIMULADA / REAL)
-           Se ejecuta cada DHT_READ_INTERVAL_MS
-           ============================================================ */
-        if ((now - last_dht_read_time) >= DHT_READ_INTERVAL_MS) {
+	    for(;;)
+	    {
+	        uint32_t now = HAL_GetTick();
 
-            /* SIMULACIÓN DE TEMPERATURA
-               (Reemplazar por DHT11_Read / DHT22_Read) */
+	        // 1. Obtener Objetivos (EEPROM/Flash)
+	        Get_Active_Targets(&target_t, &target_h, &motor_enabled);
 
-            // Si la lámpara está encendida → sube la temperatura
-            if (estado_lampara() == RELE_ACTIVO)
-                last_valid_temp += 0.2f;
-            else
-            	last_valid_temp -= 0.1f;
+	        // Actualizar datos para UI
+	        liveStatus.day_current  = Get_Current_Day();
+	        liveStatus.hour_current = Get_Current_Hour();
+	        liveStatus.temp_target  = target_t;
+	        liveStatus.hum_target   = target_h;
 
-            /* Límite inferior de seguridad */
-            if (last_valid_temp < 20.0f)
-                last_valid_temp = 20.0f;
+	        // Si el sistema está pausado (Target=0), apagar todo
+	        if (target_t == 0.0f) {
+	            RELES_ApagarTodos();
+	            flag_tolerable_active = 0; flag_critical_active = 0;
+	            vTaskDelay(pdMS_TO_TICKS(1000));
+	            continue;
+	        }
 
-            /* Actualizar valores globales de estado */
-//liveStatus.temp_current = last_valid_temp;
-            //liveStatus.hum_current  = last_valid_hum;
 
-            last_dht_read_time = now;
-        }
 
-        /* ============================================================
-           3. CONTROL DE TEMPERATURA
-           - Histéresis
-           - Soft PWM en zona muerta
-           ============================================================ */
-        float error_temp = target_t - last_valid_temp;
+	        float curr_t = liveStatus.temp_current;
+	        float curr_h = liveStatus.hum_current;
+	        float delta_t = curr_t - target_t; // Diferencia (positiva es calor)
+	        float DELTA_CRITICA = (target_t*.08f); //8% DE DESVIO DEL TARGET
+	        float DELTA_TOLERABLE = (target_t*.03f);//3% DE DESVIO
+	        float HUM_TOLERANCIA = (target_h*.05f);//5% DE DESVIO
+	        uint32_t TIEMPO_LIMITE_CRITICO = pdMS_TO_TICKS(900000); //15 MIN en ms
+	        uint32_t TIEMPO_LIMITE_TOLERABLE = pdMS_TO_TICKS(3600000); //60 MIN en ms
+	        uint32_t TIEMPO_ALARMA_HUMEDAD = pdMS_TO_TICKS(1800000); //30 MIN en ms
+	        uint32_t HUM_TIEMPO_ON = pdMS_TO_TICKS(5000);	//5seg
+			uint32_t HUM_TIEMPO_OFF = pdMS_TO_TICKS(15000);	//espera 15seg
 
-        if (error_temp > 0.5f) {
-            /* Muy frío → Lámpara ON, Cooler OFF */
-            encender_lampara();
-            apagar_cooler();
-        }
-        else if (error_temp > 0.0f && error_temp <= 0.5f) {
-            /* Zona de regulación suave (Soft PWM 15s) */
-            if ((now - last_dht_read_time) < 15000)
-                encender_lampara(); // ON
-            else
-            	apagar_lampara();   // OFF
-        }
-        else {
-            /* Temperatura alcanzada o excedida */
-            apagar_lampara(); // Lámpara OFF
+	        // ============================================================
+	        //              LOGICA DE TEMPERATURA (3 ESTADOS)
+	        // ============================================================
 
-            /* Protección térmica con ventilación */
-            if (last_valid_temp > (target_t + 1.0f))
-                encender_cooler(); // Cooler ON
-            else
-                apagar_cooler();   // Cooler OFF
-        }
+	        uint8_t activar_cooler = 0;
+	        uint8_t activar_buzzer = 0;
+	        uint8_t enviar_telegram = 0;
 
-        /* ============================================================
-           4. CONTROL DE HUMEDAD
-           Máquina de estados temporizada
-           ============================================================ */
-        switch (hum_state) {
+	        // --- 1. ESTADO CRÍTICO (Prioridad Máxima) ---
+	        if (delta_t >= DELTA_CRITICA) {
+	            // Si acabamos de entrar a crítico, iniciamos cronómetro
+	            if (!flag_critical_active) {
+	                timer_critical_start = now;
+	                flag_critical_active = 1;
+	            }
 
-            case HUM_STATE_IDLE:
-                /* Humedad baja → iniciar dosificación */
-                if (last_valid_hum < (target_h - 5.0f)) {
-                    encender_humidificador(); // ON
-                    hum_timer_start = now;
-                    hum_state = HUM_STATE_DOSING;
-                }
-                break;
+	            // Chequeo de tiempo (15 min)		//Tengo un pseudotimer que se maneja por ticks
+	            if ((now - timer_critical_start) >= TIEMPO_LIMITE_CRITICO) {
+	                activar_buzzer = 1;
+	                activar_cooler = 1; // Forzar enfriamiento
+	                enviar_telegram = 1; // "ALERTA CRITICA: HUEVO EN PELIGRO"
+	            }
+	        }
+	        else {
+	            flag_critical_active = 0; // Salimos de zona crítica
+	        }
 
-            case HUM_STATE_DOSING:
-                /* Tiempo máximo de inyección de humedad */
-                if ((now - hum_timer_start) >= HUM_DOSE_TIME_MS) {
-                    apagar_humidificador(); // OFF
-                    hum_timer_start = now;
-                    hum_state = HUM_STATE_COOLDOWN;
-                }
-                break;
+	        // --- 2. ESTADO TOLERABLE (Prioridad Media) ---
+	        // Estamos calientes, pero no críticos aún
+	        if (delta_t >= DELTA_TOLERABLE && delta_t < DELTA_CRITICA) {
+	            if (!flag_tolerable_active) {
+	                timer_tolerable_start = now;
+	                flag_tolerable_active = 1;
+	            }
 
-            case HUM_STATE_COOLDOWN:
-                /* Tiempo de estabilización antes de volver a medir */
-                if ((now - hum_timer_start) >= HUM_COOLDOWN_TIME_MS)
-                    hum_state = HUM_STATE_IDLE;
-                break;
-        }
+	            // Chequeo de tiempo (1 Hora)		//IDEM QUI
+	            if ((now - timer_tolerable_start) >= TIEMPO_LIMITE_TOLERABLE) {
+	                activar_buzzer = 1;
+	                activar_cooler = 1; // Ayudar a bajar
+	                enviar_telegram = 1; // "ALERTA: Tiempo prolongado en calor"
+	            }
+	        }
+	        else {
+	            flag_tolerable_active = 0; // Salimos de zona tolerable
+	        }
 
-        /* ============================================================
-           5. RETARDO DEL LAZO DE CONTROL
-           ============================================================ */
-        vTaskDelay(pdMS_TO_TICKS(CONTROL_LOOP_MS));
-    }
+	        // --- 3. ESTADO NORMAL (Control Histeresis) ---
+	        // Solo actuamos sobre la Lámpara aquí. El cooler y buzzer dependen de las alarmas arriba.
+
+	        if (curr_t < (target_t - DELTA_TOLERABLE)) {
+	            encender_lampara(); // Hace frío -> Calentar
+	        }
+	        else if (curr_t >= target_t + DELTA_TOLERABLE) {
+	            apagar_lampara();   // Llegamos al objetivo -> Inercia térmica hará el resto
+	        }
+
+	        // --- EJECUCIÓN DE ACTUADORES DE ALARMA ---
+	        if (activar_buzzer) encender_buzzer();
+	        else apagar_buzzer();
+
+	        if (activar_cooler) encender_cooler();
+	        else apagar_cooler();
+
+	        /* Placeholder para Telegram (Implementar envio UART aqui) */
+	        if (enviar_telegram) {
+	             // Send_Telegram_Message(ALERTA_TEMP);
+	             // Tip: Usar un timer o flag para no enviar 1 mensaje por segundo
+	        }
+
+
+	        // ============================================================
+	        //              LOGICA DE HUMEDAD (PULSANTE + ALARMA)
+	        // ============================================================
+
+	        // Alarma por tiempo fuera de rango
+	        if (curr_h < (target_h - HUM_TOLERANCIA) || curr_h > (target_h + HUM_TOLERANCIA)) {
+	             if (!flag_hum_alarm_active) {
+	                 hum_alarm_timer = now;
+	                 flag_hum_alarm_active = 1;
+	             }
+	             if ((now - hum_alarm_timer) >= TIEMPO_ALARMA_HUMEDAD) {
+	                 // Alarma simple de humedad (quizás solo mensaje telegram, sin buzzer molesto)
+	                 // Send_Telegram_Message(ALERTA_HUM);
+	             }
+	        } else {
+	             flag_hum_alarm_active = 0;
+	        }
+
+	        // Maquina de estados PULSANTE (Dosificación)
+	        switch (hum_state) {
+	            case HUM_STATE_IDLE:
+	                // Si falta humedad
+	                if (curr_h < (target_h - HUM_TOLERANCIA)) {
+	                    encender_humidificador(); // ON
+	                    hum_pulse_timer = now;
+	                    hum_state = HUM_STATE_DOSING;
+	                } else {
+	                    apagar_humidificador();
+	                }
+	                break;
+
+	            case HUM_STATE_DOSING:
+	                // Mantener ON solo por un pulso corto
+	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_ON) {
+	                    apagar_humidificador(); // OFF
+	                    hum_pulse_timer = now;
+	                    hum_state = HUM_STATE_COOLDOWN;
+	                }
+	                break;
+
+	            case HUM_STATE_COOLDOWN:
+	                // Esperar TIEMPO LARGO para dispersión antes de volver a inyectar
+	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_OFF) {
+	                    hum_state = HUM_STATE_IDLE; // Listo para medir y decidir de nuevo
+	                }
+	                break;
+	        }
+
+	        // Control Motor (Si aplica)
+	        if (motor_enabled == 0) apagar_motor();
+
+	        vTaskDelay(pdMS_TO_TICKS(1000)); // Ciclo de control de 1 segundo
+	    }
 }
 
 void StartSensorTask(void *argument){
