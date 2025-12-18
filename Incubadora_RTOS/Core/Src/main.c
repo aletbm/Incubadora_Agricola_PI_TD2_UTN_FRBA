@@ -633,11 +633,7 @@ void StartMotorTask(void *argument)
  */
 void StartControlTask(void * argument)
 {
-	/**
-	 * @brief Tarea de Control Avanzado: 3 Estados Térmicos + Humedad Pulsante.
-	 */
-
-	    // Variables de Objetivos
+	// Variables de Objetivos
 	    float target_t = 0.0f;
 	    float target_h = 0.0f;
 	    uint8_t motor_enabled = 0;
@@ -650,18 +646,28 @@ void StartControlTask(void * argument)
 	    uint8_t  flag_critical_active = 0;
 
 	    // --- TIMERS HUMEDAD ---
-	    uint32_t hum_pulse_timer = 0;   // Para el ciclo ON/OFF
-	    uint32_t hum_alarm_timer = 0;   // Para la alarma de tiempo
+	    uint32_t timer_hum_alarm_start = 0;
 	    uint8_t  flag_hum_alarm_active = 0;
 
-	    // Sincronización inicial para que el DHT11 tenga datos
+	    // --- VARIABLES PARA TELEGRAM/UART ---
+	    char msg_buffer[128];
+	    uint32_t last_telegram_tick = 0;
+	    const uint32_t TELEGRAM_COOLDOWN = 30000; // 1 mensaje por medio minuto máximo
+
+	    // Sincronización inicial
 	    vTaskDelay(pdMS_TO_TICKS(2000));
 
 	    for(;;)
 	    {
+	        // Evitar ejecución durante menú de prueba
+	        if (current_ui_mode == UI_MODE_TEST_MENU) {
+	            vTaskDelay(pdMS_TO_TICKS(500));
+	            continue;
+	        }
+
 	        uint32_t now = HAL_GetTick();
 
-	        // 1. Obtener Objetivos (EEPROM/Flash)
+	        // 1. Obtener Objetivos
 	        Get_Active_Targets(&target_t, &target_h, &motor_enabled);
 
 	        // Actualizar datos para UI
@@ -670,153 +676,409 @@ void StartControlTask(void * argument)
 	        liveStatus.temp_target  = target_t;
 	        liveStatus.hum_target   = target_h;
 
-	        // Si el sistema está pausado (Target=0), apagar todo
+	        // Si el sistema está en pausa o no iniciado
 	        if (target_t == 0.0f) {
 	            RELES_ApagarTodos();
-	            flag_tolerable_active = 0; flag_critical_active = 0;
+	            flag_tolerable_active = 0;
+	            flag_critical_active = 0;
+	            flag_hum_alarm_active = 0;
 	            vTaskDelay(pdMS_TO_TICKS(1000));
 	            continue;
 	        }
 
-
-
 	        float curr_t = liveStatus.temp_current;
 	        float curr_h = liveStatus.hum_current;
-	        float delta_t = curr_t - target_t; // Diferencia (positiva es calor)
-	        float DELTA_CRITICA = (target_t*.08f); //8% DE DESVIO DEL TARGET
-	        float DELTA_TOLERABLE = (target_t*.03f);//3% DE DESVIO
-	        float HUM_TOLERANCIA = (target_h*.05f);//5% DE DESVIO
-	        uint32_t TIEMPO_LIMITE_CRITICO = pdMS_TO_TICKS(900000); //15 MIN en ms
-	        uint32_t TIEMPO_LIMITE_TOLERABLE = pdMS_TO_TICKS(3600000); //60 MIN en ms
-	        uint32_t TIEMPO_ALARMA_HUMEDAD = pdMS_TO_TICKS(1800000); //30 MIN en ms
-	        uint32_t HUM_TIEMPO_ON = pdMS_TO_TICKS(5000);	//5seg
-			uint32_t HUM_TIEMPO_OFF = pdMS_TO_TICKS(15000);	//espera 15seg
+
+	        // --- CÁLCULO DE UMBRALES ---
+	        float diff_t = curr_t - target_t; // +Calor, -Frio
+	        float error_t_abs = fabsf(diff_t);
+
+	        // Umbrales Temperatura (3% y 8%)
+	        float UMBRAL_TEMP_TOLERABLE = target_t * 0.03f;
+	        float UMBRAL_TEMP_CRITICAL  = target_t * 0.08f;
+
+	        // Umbrales Humedad (5%)
+	        float UMBRAL_HUM_RANGO = target_h * 0.05f;
+
+	        // Tiempos Límite
+	        uint32_t TIME_LIMIT_TEMP_TOLERABLE = pdMS_TO_TICKS(3600000); // 1 Hora
+	        uint32_t TIME_LIMIT_TEMP_CRITICAL  = pdMS_TO_TICKS(900000);  // 15 Minutos
+	        uint32_t TIME_LIMIT_HUM_ALARM      = pdMS_TO_TICKS(1800000); // 30 Minutos
+
+	        // Estados de Actuadores (Lógica negativa: 1 = Encender)
+	        uint8_t req_lampara = 0;
+	        uint8_t req_cooler = 0;
+	        uint8_t req_humidificador = 0;
+	        uint8_t req_buzzer = 0;
+	        uint8_t req_telegram = 0;
+
+	        msg_buffer[0] = '\0'; // Limpiar mensaje
 
 	        // ============================================================
-	        //              LOGICA DE TEMPERATURA (3 ESTADOS)
+	        //              LÓGICA DE TEMPERATURA
 	        // ============================================================
 
-	        uint8_t activar_cooler = 0;
-	        uint8_t activar_buzzer = 0;
-	        uint8_t enviar_telegram = 0;
-
-	        // --- 1. ESTADO CRÍTICO (Prioridad Máxima) ---
-	        if (delta_t >= DELTA_CRITICA) {
-	            // Si acabamos de entrar a crítico, iniciamos cronómetro
+	        // 1. Detección de Estado CRÍTICO (> 8%)
+	        if (error_t_abs >= UMBRAL_TEMP_CRITICAL) {
 	            if (!flag_critical_active) {
 	                timer_critical_start = now;
 	                flag_critical_active = 1;
 	            }
-
-	            // Chequeo de tiempo (15 min)		//Tengo un pseudotimer que se maneja por ticks
-	            if ((now - timer_critical_start) >= TIEMPO_LIMITE_CRITICO) {
-	                activar_buzzer = 1;
-	                activar_cooler = 1; // Forzar enfriamiento
-	                enviar_telegram = 1; // "ALERTA CRITICA: HUEVO EN PELIGRO"
+	            // Alarma tras 15 minutos
+	            if ((now - timer_critical_start) >= TIME_LIMIT_TEMP_CRITICAL) {
+	                req_buzzer = 1;
+	                req_telegram = 1;
+	                snprintf(msg_buffer, sizeof(msg_buffer),
+	                    "ALERTA CRITICA: Temp %0.1fC (Desvio >8%%). Tiempo excedido.\r\n", curr_t);
 	            }
-	        }
-	        else {
-	            flag_critical_active = 0; // Salimos de zona crítica
+	        } else {
+	            flag_critical_active = 0;
 	        }
 
-	        // --- 2. ESTADO TOLERABLE (Prioridad Media) ---
-	        // Estamos calientes, pero no críticos aún
-	        if (delta_t >= DELTA_TOLERABLE && delta_t < DELTA_CRITICA) {
+	        // 2. Detección de Estado TOLERABLE (3% - 8%)
+	        if (error_t_abs >= UMBRAL_TEMP_TOLERABLE && error_t_abs < UMBRAL_TEMP_CRITICAL) {
 	            if (!flag_tolerable_active) {
 	                timer_tolerable_start = now;
 	                flag_tolerable_active = 1;
 	            }
-
-	            // Chequeo de tiempo (1 Hora)		//IDEM QUI
-	            if ((now - timer_tolerable_start) >= TIEMPO_LIMITE_TOLERABLE) {
-	                activar_buzzer = 1;
-	                activar_cooler = 1; // Ayudar a bajar
-	                enviar_telegram = 1; // "ALERTA: Tiempo prolongado en calor"
+	            // Alarma tras 1 hora
+	            if ((now - timer_tolerable_start) >= TIME_LIMIT_TEMP_TOLERABLE) {
+	                req_buzzer = 1;
+	                req_telegram = 1;
+	                // Prioridad al mensaje crítico si ya existe
+	                if (msg_buffer[0] == '\0') {
+	                    snprintf(msg_buffer, sizeof(msg_buffer),
+	                        "ALERTA TOLERABLE: Temp %0.1fC. Fuera de rango > 1 hora.\r\n", curr_t);
+	                }
 	            }
+	        } else {
+	            flag_tolerable_active = 0;
+	        }
+
+	        // 3. Control de Actuadores Temperatura
+	        if (diff_t > UMBRAL_TEMP_TOLERABLE) {
+	            // Exceso de Calor (> +3%): Activar Cooler, Apagar Lámpara
+	            req_cooler = 1;
+	            req_lampara = 0;
+	        }
+	        else if (diff_t < -UMBRAL_TEMP_TOLERABLE) {
+	            // Exceso de Frío (< -3%): Apagar Cooler, Activar Lámpara
+	            req_cooler = 0;
+	            req_lampara = 1;
 	        }
 	        else {
-	            flag_tolerable_active = 0; // Salimos de zona tolerable
+	            // Zona de Histéresis Normal (+/- 3%)
+	            // Mantenimiento simple
+	            if (curr_t < target_t) {
+	                req_lampara = 1;
+	            } else {
+	                req_lampara = 0;
+	            }
+	            // Cooler apagado en zona normal (salvo que humedad lo pida)
 	        }
 
-	        // --- 3. ESTADO NORMAL (Control Histeresis) ---
-	        // Solo actuamos sobre la Lámpara aquí. El cooler y buzzer dependen de las alarmas arriba.
+	        // ============================================================
+	        //              LÓGICA DE HUMEDAD
+	        // ============================================================
 
-	        if (curr_t < (target_t - DELTA_TOLERABLE)) {
-	            encender_lampara(); // Hace frío -> Calentar
+	        float hum_diff = curr_h - target_h;
+	        float hum_error_abs = fabsf(hum_diff);
+
+	        // 1. Alarma Fuera de Rango (> 5%)
+	        if (hum_error_abs > UMBRAL_HUM_RANGO) {
+	            if (!flag_hum_alarm_active) {
+	                timer_hum_alarm_start = now;
+	                flag_hum_alarm_active = 1;
+	            }
+	            // Alarma tras 30 minutos
+	            if ((now - timer_hum_alarm_start) >= TIME_LIMIT_HUM_ALARM) {
+	                req_buzzer = 1;
+	                req_telegram = 1;
+	                 if (msg_buffer[0] == '\0') {
+	                    snprintf(msg_buffer, sizeof(msg_buffer),
+	                        "ALERTA HUMEDAD: %0.1f%%. Fuera de rango > 30 min.\r\n", curr_h);
+	                }
+	            }
+	        } else {
+	            flag_hum_alarm_active = 0;
 	        }
-	        else if (curr_t >= target_t + DELTA_TOLERABLE) {
-	            apagar_lampara();   // Llegamos al objetivo -> Inercia térmica hará el resto
+
+	        // 2. Control Actuadores Humedad
+	        if (curr_h < (target_h - UMBRAL_HUM_RANGO)) {
+	            // Humedad Baja: Activar Humidificador
+	            req_humidificador = 1;
+	        }
+	        else if (curr_h > (target_h + UMBRAL_HUM_RANGO)) {
+	            // Humedad Alta: Activar Cooler para ventilar
+	            req_cooler = 1;
+	            req_humidificador = 0;
+	        }
+	        else {
+	            // En rango: Apagar humidificador
+	            req_humidificador = 0;
 	        }
 
-	        // --- EJECUCIÓN DE ACTUADORES DE ALARMA ---
-	        if (activar_buzzer) encender_buzzer();
-	        else apagar_buzzer();
+	        // ============================================================
+	        //              EJECUCIÓN FÍSICA
+	        // ============================================================
 
-	        if (activar_cooler) encender_cooler();
+	        // Lámpara
+	        if (req_lampara) encender_lampara();
+	        else apagar_lampara();
+
+	        // Cooler (OR Lógico: Se enciende por Temp O por Humedad)
+	        if (req_cooler) encender_cooler();
 	        else apagar_cooler();
 
-	        /* Placeholder para Telegram (Implementar envio UART aqui) */
-	        if (enviar_telegram) {
-	             // Send_Telegram_Message(ALERTA_TEMP);
-	             // Tip: Usar un timer o flag para no enviar 1 mensaje por segundo
-	        }
+	        // Humidificador
+	        if (req_humidificador) encender_humidificador();
+	        else apagar_humidificador();
 
+	        // Buzzer (Alarma sonora)
+	        if (req_buzzer) encender_buzzer();
+	        else apagar_buzzer();
 
-	        // ============================================================
-	        //              LOGICA DE HUMEDAD (PULSANTE + ALARMA)
-	        // ============================================================
-
-	        // Alarma por tiempo fuera de rango
-	        if (curr_h < (target_h - HUM_TOLERANCIA) || curr_h > (target_h + HUM_TOLERANCIA)) {
-	             if (!flag_hum_alarm_active) {
-	                 hum_alarm_timer = now;
-	                 flag_hum_alarm_active = 1;
+	        // Telegram / UART
+	        if (req_telegram && (msg_buffer[0] != '\0')) {
+	             if ((now - last_telegram_tick) > TELEGRAM_COOLDOWN) {
+	                 // Enviar por UART3
+	                 HAL_UART_Transmit(&huart3, (uint8_t*)msg_buffer, strlen(msg_buffer), 100);
+	                 last_telegram_tick = now;
 	             }
-	             if ((now - hum_alarm_timer) >= TIEMPO_ALARMA_HUMEDAD) {
-	                 // Alarma simple de humedad (quizás solo mensaje telegram, sin buzzer molesto)
-	                 // Send_Telegram_Message(ALERTA_HUM);
-	             }
-	        } else {
-	             flag_hum_alarm_active = 0;
 	        }
 
-	        // Maquina de estados PULSANTE (Dosificación)
-	        switch (hum_state) {
-	            case HUM_STATE_IDLE:
-	                // Si falta humedad
-	                if (curr_h < (target_h - HUM_TOLERANCIA)) {
-	                    encender_humidificador(); // ON
-	                    hum_pulse_timer = now;
-	                    hum_state = HUM_STATE_DOSING;
-	                } else {
-	                    apagar_humidificador();
-	                }
-	                break;
-
-	            case HUM_STATE_DOSING:
-	                // Mantener ON solo por un pulso corto
-	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_ON) {
-	                    apagar_humidificador(); // OFF
-	                    hum_pulse_timer = now;
-	                    hum_state = HUM_STATE_COOLDOWN;
-	                }
-	                break;
-
-	            case HUM_STATE_COOLDOWN:
-	                // Esperar TIEMPO LARGO para dispersión antes de volver a inyectar
-	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_OFF) {
-	                    hum_state = HUM_STATE_IDLE; // Listo para medir y decidir de nuevo
-	                }
-	                break;
-	        }
-
-	        // Control Motor (Si aplica)
+	        // Control Motor (Volteo)
 	        if (motor_enabled == 0) apagar_motor();
 
-	        vTaskDelay(pdMS_TO_TICKS(1000)); // Ciclo de control de 1 segundo
+	        vTaskDelay(pdMS_TO_TICKS(1000));
 	    }
-}
 
+
+//
+//	/**
+//	 * @brief Tarea de Control Avanzado: 3 Estados Térmicos + Humedad Pulsante.
+//	 */
+//
+//	    // Variables de Objetivos
+//	    float target_t = 0.0f;
+//	    float target_h = 0.0f;
+//	    uint8_t motor_enabled = 0;
+//
+//	    // --- TIMERS Y FLAGS DE ALARMA TEMPERATURA ---
+//	    uint32_t timer_tolerable_start = 0;
+//	    uint8_t  flag_tolerable_active = 0;
+//
+//	    uint32_t timer_critical_start = 0;
+//	    uint8_t  flag_critical_active = 0;
+//
+//	    // --- TIMERS HUMEDAD ---
+//	    uint32_t hum_pulse_timer = 0;   // Para el ciclo ON/OFF
+//	    uint32_t hum_alarm_timer = 0;   // Para la alarma de tiempo
+//	    uint8_t  flag_hum_alarm_active = 0;
+//
+//	    // --- VARIABLES PARA TELEGRAM/UART ---
+//		char msg_buffer[128];             // Buffer para el mensaje
+//		uint32_t last_telegram_tick = 0;  // Para controlar el spam de mensajes
+//		const uint32_t TELEGRAM_COOLDOWN = pdMS_TO_TICKS(60000); // Esperar 60 seg entre mensajes repetidos
+//
+//	    // Sincronización inicial para que el DHT11 tenga datos
+//	    vTaskDelay(pdMS_TO_TICKS(2000));
+//
+//	    for(;;)
+//	    {
+//	    	if (current_ui_mode == UI_MODE_TEST_MENU) {
+//	    	    vTaskDelay(pdMS_TO_TICKS(500)); // Esperar sin hacer nada
+//	    	    continue; // Saltar el ciclo de control
+//	    	}
+//	        uint32_t now = HAL_GetTick();
+//
+//	        // 1. Obtener Objetivos (EEPROM/Flash)
+//	        Get_Active_Targets(&target_t, &target_h, &motor_enabled);
+//
+//	        // Actualizar datos para UI
+//	        liveStatus.day_current  = Get_Current_Day();
+//	        liveStatus.hour_current = Get_Current_Hour();
+//	        liveStatus.temp_target  = target_t;
+//	        liveStatus.hum_target   = target_h;
+//
+//	        // Si el sistema está pausado (Target=0), apagar todo
+//	        if (target_t == 0.0f) {
+//	            RELES_ApagarTodos();
+//	            flag_tolerable_active = 0; flag_critical_active = 0;
+//	            vTaskDelay(pdMS_TO_TICKS(1000));
+//	            continue;
+//	        }
+//
+//
+//
+//	        float curr_t = liveStatus.temp_current;
+//	        float curr_h = liveStatus.hum_current;
+//	        float delta_t = curr_t - target_t; // Diferencia (positiva es calor)
+//	        float DELTA_CRITICA = (target_t*.08f); //8% DE DESVIO DEL TARGET
+//	        float DELTA_TOLERABLE = (target_t*.03f);//3% DE DESVIO
+//	        float HUM_TOLERANCIA = (target_h*.05f);//5% DE DESVIO
+//	        uint32_t TIEMPO_LIMITE_CRITICO = pdMS_TO_TICKS(900000); //15 MIN en ms
+//	        uint32_t TIEMPO_LIMITE_TOLERABLE = pdMS_TO_TICKS(3600000); //60 MIN en ms
+//	        uint32_t TIEMPO_ALARMA_HUMEDAD = pdMS_TO_TICKS(1800000); //30 MIN en ms
+//	        uint32_t HUM_TIEMPO_ON = pdMS_TO_TICKS(5000);	//5seg
+//			uint32_t HUM_TIEMPO_OFF = pdMS_TO_TICKS(15000);	//espera 15seg
+//
+//	        // ============================================================
+//	        //              LOGICA DE TEMPERATURA (3 ESTADOS)
+//	        // ============================================================
+//
+//	        uint8_t activar_cooler = 0;
+//	        uint8_t activar_buzzer = 0;
+//	        uint8_t enviar_telegram = 0;
+//
+//	        // --- 1. ESTADO CRÍTICO (Prioridad Máxima) ---
+//	        if (delta_t >= DELTA_CRITICA || delta_t <= (-DELTA_CRITICA)) {
+//	            // Si acabamos de entrar a crítico, iniciamos cronómetro
+//	            if (!flag_critical_active) {
+//	                timer_critical_start = now;
+//	                flag_critical_active = 1;
+//	                if(delta_t >= DELTA_CRITICA)
+//	                	activar_cooler = 1;
+//	                else
+//
+//
+//	                //activar_cooler = 1; // Forzar enfriamiento
+//	            }
+//
+//	            // Chequeo de tiempo (15 min)		//Tengo un pseudotimer que se maneja por ticks
+//	            if ((now - timer_critical_start) >= TIEMPO_LIMITE_CRITICO) {
+//	                activar_buzzer = 1;
+//	                enviar_telegram = 1; // "ALERTA CRITICA: HUEVO EN PELIGRO"
+//
+//	                // Preparamos el mensaje CRÍTICO
+//	                snprintf(msg_buffer, sizeof(msg_buffer),
+//	                		"ADVERTENCIA CRITICA: Temp %02.1f C. Huevo en PELIGRO.\r\n", curr_t);
+//
+//	            }
+//	        }
+//	        else {
+//	            flag_critical_active = 0; // Salimos de zona crítica
+//	        }
+//
+//	        // --- 2. ESTADO TOLERABLE (Prioridad Media) ---
+//	        // Estamos calientes, pero no críticos aún
+//	        if (delta_t >= DELTA_TOLERABLE && delta_t < DELTA_CRITICA) {
+//	            if (!flag_tolerable_active) {
+//	                timer_tolerable_start = now;
+//	                flag_tolerable_active = 1;
+//	                activar_cooler = 1; // Ayudar a bajar
+//
+//
+//	            }
+//
+//	            // Chequeo de tiempo (1 Hora)		//IDEM QUI
+//	            if ((now - timer_tolerable_start) >= TIEMPO_LIMITE_TOLERABLE) {
+//	                activar_buzzer = 1;
+//	                enviar_telegram = 1; // "ALERTA: Tiempo prolongado en calor"
+//
+//	                // Solo escribimos si no hay un mensaje más grave (Critico) ya escrito
+//					if (msg_buffer[0] == '\0') {
+//					snprintf(msg_buffer, sizeof(msg_buffer),
+//					"ATENCION: Temp %02.1f C. Tiempo prolongado fuera de rango.\r\n", curr_t);
+//	            }
+//	        }
+//	        else {
+//	            flag_tolerable_active = 0; // Salimos de zona tolerable
+//	        }
+//
+//	        // --- 3. ESTADO NORMAL (Control Histeresis) ---
+//	        // Solo actuamos sobre la Lámpara acá. El cooler y buzzer dependen de las alarmas arriba.
+//
+//	        if (curr_t < (target_t - DELTA_TOLERABLE)) {
+//	            encender_lampara(); // Hace frío -> Calentar
+//	        }
+//	        else if (curr_t >= target_t) {
+//	            apagar_lampara();   // Llegamos al objetivo -> Inercia térmica hará el resto
+//	        }
+//
+//	        // --- EJECUCIÓN DE ACTUADORES DE ALARMA ---
+//	        if (activar_buzzer) encender_buzzer();
+//	        else apagar_buzzer();
+//
+//	        if (activar_cooler) encender_cooler();
+//	        else apagar_cooler();
+//
+//	        /* --- INTEGRACIÓN UART / TELEGRAM --- */
+//	        if (enviar_telegram && (msg_buffer[0] != '\0')) {
+//	             // Verificamos Cooldown para no saturar (1 mensaje por minuto máximo)
+//	             if ((now - last_telegram_tick) > TELEGRAM_COOLDOWN) {
+//
+//	                 // Enviar por UART3 (Donde suele estar el ESP01/ESP32)
+//	                 HAL_UART_Transmit(&huart3, (uint8_t*)msg_buffer, strlen(msg_buffer), 100);
+//
+//	                 last_telegram_tick = now; // Reiniciar cooldown
+//	             }
+//	        }
+//
+//
+//	        // ============================================================
+//	        //              LOGICA DE HUMEDAD (PULSANTE + ALARMA)
+//	        // ============================================================
+//
+//	        // Alarma por tiempo fuera de rango
+//	        if (curr_h < (target_h - HUM_TOLERANCIA) || curr_h > (target_h + HUM_TOLERANCIA)) {
+//	             if (!flag_hum_alarm_active) {
+//	                 hum_alarm_timer = now;
+//	                 flag_hum_alarm_active = 1;
+//	             }
+//	             if ((now - hum_alarm_timer) >= TIEMPO_ALARMA_HUMEDAD) {
+//	                 // Preparamos mensaje de Humedad
+//	                 // Usamos un control de tiempo separado o el mismo slot si no hay alarma de temp
+//	                 if ((now - last_telegram_tick) > TELEGRAM_COOLDOWN) {
+//	                     snprintf(msg_buffer, sizeof(msg_buffer),
+//	                        "ALERTA HUMEDAD: Valor %02.1f %% (Target %02.1f). Revisar agua.\r\n",
+//	                        curr_h, target_h);
+//
+//	                     HAL_UART_Transmit(&huart3, (uint8_t*)msg_buffer, strlen(msg_buffer), 100);
+//	                     last_telegram_tick = now;
+//	                 }
+//	             }
+//	        } else {
+//	             flag_hum_alarm_active = 0;
+//	        }
+//
+//	        // Maquina de estados PULSANTE (Dosificación)
+//	        switch (hum_state) {
+//	            case HUM_STATE_IDLE:
+//	                // Si falta humedad
+//	                if (curr_h < (target_h - HUM_TOLERANCIA)) {
+//	                    encender_humidificador(); // ON
+//	                    hum_pulse_timer = now;
+//	                    hum_state = HUM_STATE_DOSING;
+//	                } else {
+//	                    apagar_humidificador();
+//	                }
+//	                break;
+//
+//	            case HUM_STATE_DOSING:
+//	                // Mantener ON solo por un pulso corto
+//	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_ON) {
+//	                    apagar_humidificador(); // OFF
+//	                    hum_pulse_timer = now;
+//	                    hum_state = HUM_STATE_COOLDOWN;
+//	                }
+//	                break;
+//
+//	            case HUM_STATE_COOLDOWN:
+//	                // Esperar TIEMPO LARGO para dispersión antes de volver a inyectar
+//	                if ((now - hum_pulse_timer) >= HUM_TIEMPO_OFF) {
+//	                    hum_state = HUM_STATE_IDLE; // Listo para medir y decidir de nuevo
+//	                }
+//	                break;
+//	        }
+//
+//	        // Control Motor (Si aplica)
+//	        if (motor_enabled == 0) apagar_motor();
+//
+//	        vTaskDelay(pdMS_TO_TICKS(1000)); // Ciclo de control de 1 segundo
+//	    }
+//}
+}
 void StartSensorTask(void *argument){
     TickType_t lastWake = xTaskGetTickCount();
 
@@ -901,7 +1163,7 @@ int main(void)
   xTaskCreate(StartMenuTask, "Menu", 1024, NULL, osPriorityRealtime, &menuTaskHandle);
   xTaskCreate(StartDebounceTask, "Debounce", 128, NULL, osPriorityNormal, &debounceTaskHandle);
   //xTaskCreate(StartMotorTask, "Motor", 128, NULL, osPriorityNormal, &motorTaskHandle);
-  //xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);
+  xTaskCreate(StartControlTask, "Control", 512, NULL, osPriorityNormal, &controlTaskHandle);
   xTaskCreate(StartSensorTask, "Sensor", 1024, NULL, osPriorityAboveNormal, &sensorTaskHandle);
 
   /* USER CODE END RTOS_THREADS */
