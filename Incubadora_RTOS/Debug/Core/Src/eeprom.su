@@ -1,2 +1,0 @@
-eeprom.c:31:6:Load_Config_From_Flash	16	static
-eeprom.c:92:6:Save_Config_To_Flash	48	static

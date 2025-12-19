@@ -1,5 +1,0 @@
-utils.c:44:6:toggle_output	16	static
-utils.c:74:9:Get_Current_Day	24	static
-utils.c:111:6:Get_Active_Targets	32	static
-utils.c:156:9:Get_Current_Hour	24	static
-utils.c:192:9:Get_Current_Minute	16	static

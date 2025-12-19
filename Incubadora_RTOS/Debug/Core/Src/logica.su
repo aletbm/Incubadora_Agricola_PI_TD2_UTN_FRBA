@@ -1,4 +1,0 @@
-logica.c:31:6:reset_alarma_temp	24	static
-logica.c:45:6:reset_alarma_humedad	24	static
-logica.c:65:6:control_alarma	32	static
-logica.c:98:6:control_parametros	16	static
