@@ -37,8 +37,8 @@ Desarrollado para la cátedra de **Técnicas Digitales II (2025-R4051) - UTN FRB
 </p>
 
 <p align="center"><i>Demo de la impresion 3D.</i></p>
-https://github.com/aletbm/Incubadora_Agricola_PI_TD2_UTN_FRBA/blob/main/Documentacion/Fotos%20y%20videos/Impresion3D.mp4
 
+https://github.com/user-attachments/assets/dec2215c-aceb-45dd-a1e9-db4e97dc1aad
 
 ---
 
