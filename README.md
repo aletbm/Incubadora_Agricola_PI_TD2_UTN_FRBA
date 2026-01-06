@@ -36,6 +36,9 @@ Desarrollado para la cátedra de **Técnicas Digitales II (2025-R4051) - UTN FRB
   <img src="Documentacion/Fotos%20y%20videos/WhatsApp Image 2025-12-18 at 19.35.49.jpeg" width="50%" alt="Interfaz LCD">
 </p>
 
+<p align="center"><i>Demo de la impresion 3D.</i></p>
+https://github.com/aletbm/Incubadora_Agricola_PI_TD2_UTN_FRBA/blob/main/Documentacion/Fotos%20y%20videos/Impresion3D.mp4
+
 
 ---
 
