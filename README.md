@@ -1,4 +1,4 @@
-# Incubadora Inteligente Agrícola 🐣 
+# Incubadora Agrícola Automatica 🐣 
 
 Este proyecto consiste en una **incubadora automatizada** diseñada para optimizar y controlar los parámetros críticos de temperatura y humedad necesarios para la eclosión de huevos de gallina (ciclo de 21 días). Utiliza un sistema embebido basado en **STM32** con **FreeRTOS** para la gestión de tareas en tiempo real y comunicación remota vía **Telegram**.
 
